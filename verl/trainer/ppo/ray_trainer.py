@@ -469,6 +469,8 @@ class RayPPOTrainer:
             self.use_critic = True
         elif self.config.algorithm.adv_estimator in [
             AdvantageEstimator.GRPO,
+            AdvantageEstimator.NAIVE_GRPO,
+            AdvantageEstimator.ADVANCED_GRPO,
             AdvantageEstimator.GRPO_PASSK,
             AdvantageEstimator.REINFORCE_PLUS_PLUS,
             AdvantageEstimator.REMAX,
@@ -478,7 +480,7 @@ class RayPPOTrainer:
         ]:
             self.use_critic = False
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"Advantage estimator {self.config.algorithm.adv_estimator} is not implemented")
 
         self._validate_config()
         self._create_dataloader(train_dataset, val_dataset, collate_fn, train_sampler)
@@ -592,7 +594,11 @@ class RayPPOTrainer:
         # check multi_turn with tool config
         if config.actor_rollout_ref.rollout.multi_turn.enable:
             assert config.actor_rollout_ref.rollout.multi_turn.tool_config_path is not None, "tool_config_path must be set when enabling multi_turn with tool, due to no role-playing support"
-            assert config.algorithm.adv_estimator in [AdvantageEstimator.GRPO], "only GRPO is tested for multi-turn with tool"
+            assert config.algorithm.adv_estimator in [
+                AdvantageEstimator.GRPO, 
+                AdvantageEstimator.NAIVE_GRPO, 
+                AdvantageEstimator.ADVANCED_GRPO
+            ], "only GRPO, NAIVE_GRPO, and ADVANCED_GRPO are supported for multi-turn with tool"
 
         print("[validate_config] All configuration checks passed successfully!")
 
