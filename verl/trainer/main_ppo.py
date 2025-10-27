@@ -19,7 +19,7 @@ import os
 
 import hydra
 import ray
-
+from ray.util import pdb
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer
 from verl.trainer.ppo.reward import load_reward_manager
 
@@ -33,7 +33,11 @@ def run_ppo(config) -> None:
     if not ray.is_initialized():
         # this is for local ray cluster
         ray.init(
-            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN", "VLLM_ALLOW_RUNTIME_LORA_UPDATING": "true"}},
+            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", 
+                                      "NCCL_DEBUG": "WARN", 
+                                      "VLLM_LOGGING_LEVEL": "WARN", 
+                                      "VLLM_ALLOW_RUNTIME_LORA_UPDATING": "true",
+                                      "RAY_DEBUG": "1"}},
             num_cpus=config.ray_init.num_cpus,
         )
 
@@ -175,8 +179,8 @@ class TaskRunner:
             val_envs=val_envs,
         )
         trainer.init_workers()
+        breakpoint()
         trainer.fit()
-
 
 def create_rl_dataset(data_paths, data_config, tokenizer, processor):
     """Create a dataset.
