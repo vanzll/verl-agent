@@ -87,6 +87,8 @@ class AdvantageEstimator(str, Enum):
 
     GAE = "gae"
     GRPO = "grpo"
+    NAIVE_GRPO = "naive_grpo"
+    ADVANCED_GRPO = "advanced_grpo"
     REINFORCE_PLUS_PLUS = "reinforce_plus_plus"
     REINFORCE_PLUS_PLUS_BASELINE = "reinforce_plus_plus_baseline"
     REMAX = "remax"
@@ -296,6 +298,28 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
+    elif adv_estimator == AdvantageEstimator.NAIVE_GRPO:
+        # Naive GRPO: compute advantage at episode level, then broadcast to all steps and tokens
+        advantages, returns = core_algos.compute_naive_grpo_outcome_advantage(
+            episode_rewards=data.non_tensor_batch["episode_rewards"],
+            response_mask=data.batch["response_mask"],
+            index=data.non_tensor_batch["uid"],
+            traj_index=data.non_tensor_batch['traj_uid'],
+            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+        )
+        data.batch["advantages"] = advantages
+        data.batch["returns"] = returns
+    elif adv_estimator == AdvantageEstimator.ADVANCED_GRPO:
+        # Advanced GRPO: broadcast episode reward to all tokens, then normalize at token level
+        advantages, returns = core_algos.compute_advanced_grpo_outcome_advantage(
+            episode_rewards=data.non_tensor_batch["episode_rewards"],
+            response_mask=data.batch["response_mask"],
+            index=data.non_tensor_batch["uid"],
+            traj_index=data.non_tensor_batch['traj_uid'],
+            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+        )
+        data.batch["advantages"] = advantages
+        data.batch["returns"] = returns
     elif adv_estimator == AdvantageEstimator.GRPO_PASSK:
         advantages, returns = core_algos.compute_grpo_passk_outcome_advantage(
             token_level_rewards=data.batch["token_level_rewards"],
@@ -413,7 +437,7 @@ class RayPPOTrainer:
         self.tokenizer = tokenizer
         self.processor = processor
         self.config = config
-        self.reward_fn = reward_fn
+        self.reward_fn = reward_fn # reward_manager_cls
         self.val_reward_fn = val_reward_fn
         self.envs = envs
         self.val_envs = val_envs
@@ -1234,7 +1258,9 @@ class RayPPOTrainer:
                             gigpo_similarity_thresh=self.config.algorithm.gigpo.similarity_thresh,
                         )
                         # breakpoint of ray
-
+                        breakpoint()
+                        for _ in range(10):
+                            print('breakpoint in ray_trainer.py')
                         #pdb.set_trace()
 
                     # update critic

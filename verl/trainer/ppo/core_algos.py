@@ -174,6 +174,192 @@ def compute_grpo_outcome_advantage(
     return scores, scores
 
 
+def compute_naive_grpo_outcome_advantage(
+    episode_rewards: np.ndarray,
+    response_mask: torch.Tensor,
+    index: np.ndarray,
+    traj_index: np.ndarray,
+    epsilon: float = 1e-6,
+    norm_adv_by_std_in_grpo: bool = True,
+):
+    """
+    Compute advantage for Naive GRPO at episode level.
+    Unlike standard GRPO which computes advantages at step level,
+    this version computes advantages directly from episode rewards,
+    then broadcasts them to all steps and tokens in that episode.
+    
+    Args:
+        episode_rewards: np.ndarray
+            shape (bs,) - the total reward for each episode
+        response_mask: torch.Tensor
+            shape (bs, response_length)
+        index: np.ndarray
+            shape (bs,) - group ID (uid) for each sample
+        traj_index: np.ndarray
+            shape (bs,) - trajectory ID for each sample
+        epsilon: float
+            numerical stability constant
+        norm_adv_by_std_in_grpo: bool
+            whether to normalize by std
+            
+    Returns:
+        advantages: torch.Tensor
+            shape (bs, response_length)
+        returns: torch.Tensor
+            shape (bs, response_length)
+    """
+    # Convert episode_rewards to tensor if it's numpy
+    if isinstance(episode_rewards, np.ndarray):
+        episode_rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float32)
+    else:
+        episode_rewards_tensor = episode_rewards
+    
+    id2score = defaultdict(list)
+    id2mean = {}
+    id2std = {}
+    seen_pairs = set()
+    
+    with torch.no_grad():
+        bsz = episode_rewards_tensor.shape[0]
+        
+        # Group episode rewards by uid (not by traj_uid, to group across trajectory steps)
+        for i in range(bsz):
+            # For episode-level aggregation, we only want unique episodes per group
+            # Use traj_index to identify unique episodes
+            if (index[i], traj_index[i]) in seen_pairs:
+                continue
+            id2score[index[i]].append(episode_rewards_tensor[i])
+            seen_pairs.add((index[i], traj_index[i]))
+        
+        # Compute mean and std for each group
+        for idx in id2score:
+            if len(id2score[idx]) == 1:
+                id2mean[idx] = torch.tensor(0.0)
+                id2std[idx] = torch.tensor(1.0)
+            elif len(id2score[idx]) > 1:
+                id2mean[idx] = torch.mean(torch.stack(id2score[idx]))
+                id2std[idx] = torch.std(torch.stack(id2score[idx]))
+            else:
+                raise ValueError(f"no score in prompt index: {idx}")
+        
+        # Compute normalized episode-level advantages
+        advantages_scalar = torch.zeros(bsz, dtype=torch.float32)
+        for i in range(bsz):
+            if norm_adv_by_std_in_grpo:
+                advantages_scalar[i] = (episode_rewards_tensor[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
+            else:
+                advantages_scalar[i] = episode_rewards_tensor[i] - id2mean[index[i]]
+        
+        # Broadcast episode-level advantages to all tokens in the response
+        advantages = advantages_scalar.unsqueeze(-1) * response_mask
+    
+    return advantages, advantages
+
+
+def compute_advanced_grpo_outcome_advantage(
+    episode_rewards: np.ndarray,
+    response_mask: torch.Tensor,
+    index: np.ndarray,
+    traj_index: np.ndarray,
+    epsilon: float = 1e-6,
+    norm_adv_by_std_in_grpo: bool = True,
+):
+    """
+    Compute advantage for Advanced GRPO at token level.
+    
+    This method broadcasts episode rewards to all tokens, then normalizes at the token level
+    within each group. This ensures that the sum of all token-level advantages in a group is zero.
+    
+    Flow:
+    1. Broadcast episode_reward to all tokens in that episode
+    2. Collect all tokens within the same group (uid)
+    3. Compute mean and std across all tokens in the group
+    4. Normalize each token: adv = (token_reward - token_level_mean) / token_level_std
+    
+    Args:
+        episode_rewards: np.ndarray
+            shape (bs,) - the total reward for each episode
+        response_mask: torch.Tensor
+            shape (bs, response_length)
+        index: np.ndarray
+            shape (bs,) - group ID (uid) for each sample
+        traj_index: np.ndarray
+            shape (bs,) - trajectory ID for each sample
+        epsilon: float
+            numerical stability constant
+        norm_adv_by_std_in_grpo: bool
+            whether to normalize by std
+            
+    Returns:
+        advantages: torch.Tensor
+            shape (bs, response_length)
+        returns: torch.Tensor
+            shape (bs, response_length)
+    """
+    # Convert episode_rewards to tensor if it's numpy
+    if isinstance(episode_rewards, np.ndarray):
+        episode_rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float32)
+    else:
+        episode_rewards_tensor = episode_rewards
+    
+    bsz = episode_rewards_tensor.shape[0]
+    response_length = response_mask.shape[1]
+    
+    # Step 1: Broadcast episode rewards to all tokens
+    # Shape: (bs, response_length) - each token in an episode gets the same episode reward
+    token_level_rewards = episode_rewards_tensor.unsqueeze(-1).expand(-1, response_length) * response_mask
+    
+    # Step 2: Collect all tokens within each group for token-level statistics
+    id2tokens = defaultdict(list)
+    seen_pairs = set()
+    
+    with torch.no_grad():
+        # Collect all token rewards per group
+        for i in range(bsz):
+            # Only count each trajectory once to avoid duplicates
+            if (index[i], traj_index[i]) in seen_pairs:
+                continue
+            seen_pairs.add((index[i], traj_index[i]))
+            
+            # Get all valid tokens for this sample
+            valid_mask = response_mask[i] > 0
+            valid_token_rewards = token_level_rewards[i, valid_mask]
+            
+            # Add to group's token list
+            id2tokens[index[i]].extend(valid_token_rewards.tolist())
+        
+        # Step 3: Compute token-level mean and std for each group
+        id2mean = {}
+        id2std = {}
+        for idx in id2tokens:
+            tokens = torch.tensor(id2tokens[idx], dtype=torch.float32)
+            if len(tokens) == 0:
+                raise ValueError(f"No tokens in group {idx}")
+            elif len(tokens) == 1:
+                # Single token: advantage = 0
+                id2mean[idx] = tokens[0]
+                id2std[idx] = torch.tensor(1.0)
+            else:
+                # Multiple tokens: compute mean and std
+                id2mean[idx] = torch.mean(tokens)
+                id2std[idx] = torch.std(tokens)
+        
+        # Step 4: Normalize each token
+        advantages = torch.zeros_like(token_level_rewards)
+        for i in range(bsz):
+            if norm_adv_by_std_in_grpo:
+                # Normalize: (token_reward - group_mean) / group_std
+                advantages[i] = (token_level_rewards[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
+            else:
+                # Only subtract mean
+                advantages[i] = token_level_rewards[i] - id2mean[index[i]]
+            
+            # Apply mask to keep only valid tokens
+            advantages[i] = advantages[i] * response_mask[i]
+    
+    return advantages, advantages
+
+
 def compute_grpo_passk_outcome_advantage(
     token_level_rewards: torch.Tensor,
     response_mask: torch.Tensor,

@@ -37,7 +37,7 @@ def run_ppo(config) -> None:
                                       "NCCL_DEBUG": "WARN", 
                                       "VLLM_LOGGING_LEVEL": "WARN", 
                                       "VLLM_ALLOW_RUNTIME_LORA_UPDATING": "true",
-                                      "RAY_DEBUG": "1"}},
+                                      "RAY_DEBUG": "0"}},
             num_cpus=config.ray_init.num_cpus,
         )
 
@@ -180,6 +180,7 @@ class TaskRunner:
         )
         trainer.init_workers()
         breakpoint()
+        #pdb.set_trace()
         trainer.fit()
 
 def create_rl_dataset(data_paths, data_config, tokenizer, processor):
