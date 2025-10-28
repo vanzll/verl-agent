@@ -3,7 +3,7 @@
 # Below, is the queue
 #PBS -q normal
 #PBS -j oe
-#PBS -l select=1:ncpus=56:ngpus=4:mem=512G
+#PBS -l select=1:ncpus=56:ngpus=2:mem=100G
 #PBS -l walltime=12:00:00
 #PBS -P 13014347 
 #PBS -N verl-agent_naive_grpo

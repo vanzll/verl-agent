@@ -300,8 +300,10 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         data.batch["returns"] = returns
     elif adv_estimator == AdvantageEstimator.NAIVE_GRPO:
         # Naive GRPO: compute advantage at episode level, then broadcast to all steps and tokens
+        # Ensure numeric dtype; DataProto may store non-tensors as dtype=object
+        episode_rewards_np = np.asarray(data.non_tensor_batch["episode_rewards"], dtype=np.float32)
         advantages, returns = core_algos.compute_naive_grpo_outcome_advantage(
-            episode_rewards=data.non_tensor_batch["episode_rewards"],
+            episode_rewards=episode_rewards_np,
             response_mask=data.batch["response_mask"],
             index=data.non_tensor_batch["uid"],
             traj_index=data.non_tensor_batch['traj_uid'],
@@ -311,8 +313,10 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         data.batch["returns"] = returns
     elif adv_estimator == AdvantageEstimator.ADVANCED_GRPO:
         # Advanced GRPO: broadcast episode reward to all tokens, then normalize at token level
+        # Ensure numeric dtype; DataProto may store non-tensors as dtype=object
+        episode_rewards_np = np.asarray(data.non_tensor_batch["episode_rewards"], dtype=np.float32)
         advantages, returns = core_algos.compute_advanced_grpo_outcome_advantage(
-            episode_rewards=data.non_tensor_batch["episode_rewards"],
+            episode_rewards=episode_rewards_np,
             response_mask=data.batch["response_mask"],
             index=data.non_tensor_batch["uid"],
             traj_index=data.non_tensor_batch['traj_uid'],
