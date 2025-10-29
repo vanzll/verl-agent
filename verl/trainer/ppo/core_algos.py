@@ -113,7 +113,7 @@ def compute_gae_advantage_return(
 def compute_grpo_outcome_advantage(
     token_level_rewards: torch.Tensor,
     response_mask: torch.Tensor,
-    index: np.ndarray,
+    index: np.ndarray, # I guess this if group id (uid) for each sample
     traj_index: np.ndarray,
     epsilon: float = 1e-6,
     norm_adv_by_std_in_grpo: str = True,
