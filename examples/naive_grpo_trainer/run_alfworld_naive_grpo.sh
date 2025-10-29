@@ -13,9 +13,10 @@ python3 -m examples.data_preprocess.prepare \
     --mode 'text' \
     --train_data_size $train_data_size \
     --val_data_size $val_data_size
-
+# if algorithm.adv_estimator is grpo, and algorithm.norm_adv_by_std_in_grpo is False, then the algorithm is naive_grpo
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=naive_grpo \
+    algorithm.adv_estimator=grpo \
+    algorithm.compute_mean_std_cross_steps=False \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -58,7 +59,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='naive_grpo_qwen2.5_1.5b' \
+    trainer.experiment_name='naive_grpo_original_qwen2.5_1.5b' \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
