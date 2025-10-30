@@ -246,7 +246,7 @@ def compute_advantage(data: DataProto, adv_estimator,
                       gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, 
                       norm_adv_by_std_in_grpo=True, step_advantage_w=1.0, 
                       gigpo_mode="mean_std_norm", gigpo_enable_similarity=False, gigpo_similarity_thresh=0.95, 
-                      compute_mean_std_cross_steps=True, **kwargs):
+                      compute_mean_std_cross_steps=True, memory_optimize=False, **kwargs):
     """Compute advantage estimates for policy optimization.
 
     This function computes advantage estimates using various estimators like GAE, GRPO, REINFORCE++, etc.
@@ -288,7 +288,6 @@ def compute_advantage(data: DataProto, adv_estimator,
             )
     elif adv_estimator == AdvantageEstimator.GRPO:
         # TODO: test on more adv estimator type
-        grpo_calculation_mask = data.batch["response_mask"]
         if multi_turn:
             # If multi-turn, replace the mask with the relevant part of loss_mask
             response_length = grpo_calculation_mask.size(1)  # Get length from the initial response mask
@@ -296,7 +295,7 @@ def compute_advantage(data: DataProto, adv_estimator,
         # Call compute_grpo_outcome_advantage with parameters matching its definition
         advantages, returns = core_algos.compute_grpo_outcome_advantage(
             token_level_rewards=data.batch["token_level_rewards"],
-            response_mask=grpo_calculation_mask,
+            response_mask=data.batch["response_mask"],
             index=data.non_tensor_batch["uid"],
             traj_index=data.non_tensor_batch['traj_uid'],
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
@@ -304,29 +303,30 @@ def compute_advantage(data: DataProto, adv_estimator,
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
-    elif adv_estimator == AdvantageEstimator.NAIVE_GRPO:
+    elif adv_estimator == AdvantageEstimator.NAIVE_GRPO: # dumped
         # Naive GRPO: compute advantage at episode level, then broadcast to all steps and tokens
         # Ensure numeric dtype; DataProto may store non-tensors as dtype=object
-        episode_rewards_np = np.asarray(data.non_tensor_batch["episode_rewards"], dtype=np.float32)
         advantages, returns = core_algos.compute_naive_grpo_outcome_advantage(
-            episode_rewards=episode_rewards_np,
+            episode_rewards=None,
             response_mask=data.batch["response_mask"],
             index=data.non_tensor_batch["uid"],
             traj_index=data.non_tensor_batch['traj_uid'],
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+            token_level_rewards=data.batch["token_level_rewards"],
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
     elif adv_estimator == AdvantageEstimator.ADVANCED_GRPO:
         # Advanced GRPO: broadcast episode reward to all tokens, then normalize at token level
         # Ensure numeric dtype; DataProto may store non-tensors as dtype=object
-        episode_rewards_np = np.asarray(data.non_tensor_batch["episode_rewards"], dtype=np.float32)
         advantages, returns = core_algos.compute_advanced_grpo_outcome_advantage(
-            episode_rewards=episode_rewards_np,
+            episode_rewards=None,
             response_mask=data.batch["response_mask"],
             index=data.non_tensor_batch["uid"],
             traj_index=data.non_tensor_batch['traj_uid'],
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+            token_level_rewards=data.batch["token_level_rewards"],
+            memory_optimize=memory_optimize,
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
@@ -1273,6 +1273,7 @@ class RayPPOTrainer:
                             gigpo_enable_similarity= self.config.algorithm.gigpo.enable_similarity,
                             gigpo_similarity_thresh=self.config.algorithm.gigpo.similarity_thresh,
                             compute_mean_std_cross_steps=compute_mean_std_cross_steps,
+                            memory_optimize=self.config.algorithm.get("memory_optimize", False),
                         )
                         # breakpoint of ray
                         breakpoint()

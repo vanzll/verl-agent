@@ -141,6 +141,8 @@ def compute_grpo_outcome_advantage(
         Returns: `(torch.Tensor)`
             shape is (bs, response_length)
     """
+    if compute_mean_std_cross_steps == False:
+        print("Use Naive GRPO")
     scores = token_level_rewards.sum(dim=-1)
 
     id2score = defaultdict(list)
@@ -181,6 +183,7 @@ def compute_naive_grpo_outcome_advantage(
     traj_index: np.ndarray,
     epsilon: float = 1e-6,
     norm_adv_by_std_in_grpo: bool = True,
+    token_level_rewards: torch.Tensor | None = None,
 ):
     """
     Compute advantage for Naive GRPO at episode level.
@@ -201,6 +204,10 @@ def compute_naive_grpo_outcome_advantage(
             numerical stability constant
         norm_adv_by_std_in_grpo: bool
             whether to normalize by std
+        token_level_rewards: torch.Tensor | None
+            Optional. If provided (shape (bs, response_length)), the function will compute episode rewards
+            by summing token_level_rewards over the response dimension, ensuring consistency with
+            compute_grpo_outcome_advantage interface.
             
     Returns:
         advantages: torch.Tensor
@@ -208,11 +215,18 @@ def compute_naive_grpo_outcome_advantage(
         returns: torch.Tensor
             shape (bs, response_length)
     """
-    # Convert episode_rewards to tensor if it's numpy
-    if isinstance(episode_rewards, np.ndarray):
-        episode_rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float32)
+    # Prefer token_level_rewards when provided for interface consistency
+    if token_level_rewards is not None:
+        if isinstance(token_level_rewards, torch.Tensor):
+            episode_rewards_tensor = token_level_rewards.sum(-1).to(dtype=torch.float32)
+        else:
+            raise ValueError("token_level_rewards must be a torch.Tensor when provided")
     else:
-        episode_rewards_tensor = episode_rewards
+        # Convert episode_rewards to tensor if it's numpy
+        if isinstance(episode_rewards, np.ndarray):
+            episode_rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float32)
+        else:
+            episode_rewards_tensor = episode_rewards
     
     id2score = defaultdict(list)
     id2mean = {}
@@ -263,6 +277,8 @@ def compute_advanced_grpo_outcome_advantage(
     traj_index: np.ndarray,
     epsilon: float = 1e-6,
     norm_adv_by_std_in_grpo: bool = True,
+    token_level_rewards: torch.Tensor | None = None,
+    memory_optimize: bool = False,
 ):
     """
     Compute advantage for Advanced GRPO at token level.
@@ -289,6 +305,10 @@ def compute_advanced_grpo_outcome_advantage(
             numerical stability constant
         norm_adv_by_std_in_grpo: bool
             whether to normalize by std
+        token_level_rewards: torch.Tensor | None
+            Optional. If provided (shape (bs, response_length)), token-level rewards will be used directly
+            instead of broadcasting episode rewards, aligning the call signature with
+            compute_grpo_outcome_advantage while keeping internal behavior different.
             
     Returns:
         advantages: torch.Tensor
@@ -296,18 +316,69 @@ def compute_advanced_grpo_outcome_advantage(
         returns: torch.Tensor
             shape (bs, response_length)
     """
-    # Convert episode_rewards to tensor if it's numpy
-    if isinstance(episode_rewards, np.ndarray):
-        episode_rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float32)
-    else:
-        episode_rewards_tensor = episode_rewards
-    
-    bsz = episode_rewards_tensor.shape[0]
+    # Determine rewards and apply memory-optimized path if requested
     response_length = response_mask.shape[1]
-    
-    # Step 1: Broadcast episode rewards to all tokens
-    # Shape: (bs, response_length) - each token in an episode gets the same episode reward
-    token_level_rewards = episode_rewards_tensor.unsqueeze(-1).expand(-1, response_length) * response_mask
+    device = response_mask.device
+
+    if memory_optimize:
+        # Use weighted group statistics without forming token-level matrices.
+        # 1) Per-sample scalar reward r_i
+        if token_level_rewards is not None:
+            if not isinstance(token_level_rewards, torch.Tensor):
+                raise ValueError("token_level_rewards must be a torch.Tensor when provided")
+            r_i = token_level_rewards.to(device=device, dtype=torch.float32).sum(-1)
+        else:
+            if isinstance(episode_rewards, np.ndarray):
+                r_i = torch.tensor(episode_rewards, dtype=torch.float32, device=device)
+            else:
+                r_i = episode_rewards.to(device=device, dtype=torch.float32)
+
+        bsz = r_i.shape[0]
+        # 2) Weights = number of valid tokens per sample
+        w_i = response_mask.to(dtype=torch.float32).sum(-1)
+
+        # 3) Map uid to compact group ids
+        _, inv = np.unique(index, return_inverse=True)
+        group_id = torch.from_numpy(inv).to(device=device, dtype=torch.long)
+        num_groups = int(group_id.max().item() + 1) if bsz > 0 else 0
+
+        # 4) Group sums
+        sum_w = torch.zeros(num_groups, device=device, dtype=torch.float32)
+        sum_wr = torch.zeros(num_groups, device=device, dtype=torch.float32)
+        sum_w.scatter_add_(0, group_id, w_i)
+        sum_wr.scatter_add_(0, group_id, w_i * r_i)
+
+        mean_group = sum_wr / (sum_w + 1e-8)
+        mean_per_sample = mean_group[group_id]
+
+        if norm_adv_by_std_in_grpo:
+            # weighted variance over scalar r_i with weights w_i
+            diff = r_i - mean_per_sample
+            sum_w_diff2 = torch.zeros(num_groups, device=device, dtype=torch.float32)
+            sum_w_diff2.scatter_add_(0, group_id, w_i * diff * diff)
+            std_group = torch.sqrt(sum_w_diff2 / (sum_w + 1e-8))
+            std_per_sample = std_group[group_id]
+            a_i = diff / (std_per_sample + epsilon)
+        else:
+            a_i = r_i - mean_per_sample
+
+        # 5) Broadcast scalar advantage per sample to tokens lazily at the end
+        advantages = a_i.unsqueeze(-1) * response_mask
+        return advantages, advantages
+    else:
+        # Non-optimized path: broadcast scalar rewards to all tokens first, then normalize over tokens per group
+        if token_level_rewards is not None:
+            if not isinstance(token_level_rewards, torch.Tensor):
+                raise ValueError("token_level_rewards must be a torch.Tensor when provided")
+            episode_rewards_tensor = token_level_rewards.to(device=device, dtype=torch.float32).sum(-1)
+        else:
+            if isinstance(episode_rewards, np.ndarray):
+                episode_rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float32, device=device)
+            else:
+                episode_rewards_tensor = episode_rewards.to(device=device, dtype=torch.float32)
+
+        bsz = episode_rewards_tensor.shape[0]
+        token_level_rewards = episode_rewards_tensor.unsqueeze(-1).expand(-1, response_length) * response_mask
     
     # Step 2: Collect all tokens within each group for token-level statistics
     id2tokens = defaultdict(list)
@@ -317,8 +388,8 @@ def compute_advanced_grpo_outcome_advantage(
         # Collect all token rewards per group
         for i in range(bsz):
             # Only count each trajectory once to avoid duplicates
-            if (index[i], traj_index[i]) in seen_pairs:
-                continue
+            """ if (index[i], traj_index[i]) in seen_pairs:
+                continue  # Problematic !!!!!!!! """
             seen_pairs.add((index[i], traj_index[i]))
             
             # Get all valid tokens for this sample
