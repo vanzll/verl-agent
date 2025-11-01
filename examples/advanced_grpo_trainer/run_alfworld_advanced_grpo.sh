@@ -1,7 +1,7 @@
 set -x
 ENGINE=${1:-vllm}
 export VLLM_ATTENTION_BACKEND=XFORMERS
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0,1
 num_cpus_per_env_worker=0.1 # The CPU resource allocated for each environment worker. If you want to use less CPU resources, you can decrease this value.
 
 train_data_size=16
@@ -13,10 +13,13 @@ python3 -m examples.data_preprocess.prepare \
     --mode 'text' \
     --train_data_size $train_data_size \
     --val_data_size $val_data_size
-
+#actor_rollout_ref.actor.loss_agg_mode='seq-mean-token-sum' means compute the loss in step level (mathematically WIP)
+#algorithm.compute_mean_std_cross_steps=True means compute the advantage in step level (mathematically WIP)
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=advanced_grpo \
-    +algorithm.memory_optimize=True \
+    +algorithm.compute_mean_std_cross_steps=True \
+    +actor_rollout_ref.actor.loss_agg_mode='seq-mean-token-sum' \
+    +algorithm.memory_optimize=False\
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -38,7 +41,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=32 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=4 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.name=$ENGINE \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
@@ -59,8 +62,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='advanced_grpo_qwen2.5_1.5b' \
-    trainer.n_gpus_per_node=4 \
+    trainer.experiment_name='Adv_step_Loss_Step_grpo_qwen2.5_1.5b' \
+    trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \

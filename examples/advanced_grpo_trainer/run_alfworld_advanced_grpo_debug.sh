@@ -1,7 +1,7 @@
 set -x
 ENGINE=${1:-vllm}
 export VLLM_ATTENTION_BACKEND=XFORMERS
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 num_cpus_per_env_worker=0.1 # The CPU resource allocated for each environment worker. If you want to use less CPU resources, you can decrease this value.
 
 train_data_size=8
@@ -58,7 +58,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='advanced_grpo_qwen2.5_0.5b' \
+    trainer.experiment_name='test' \
     trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
