@@ -37,7 +37,7 @@ def run_ppo(config) -> None:
                                       "NCCL_DEBUG": "WARN", 
                                       "VLLM_LOGGING_LEVEL": "WARN", 
                                       "VLLM_ALLOW_RUNTIME_LORA_UPDATING": "true",
-                                      "RAY_DEBUG": "0"}},
+                                      "RAY_DEBUG": "1"}},
             num_cpus=config.ray_init.num_cpus,
         )
 
@@ -179,7 +179,7 @@ class TaskRunner:
             val_envs=val_envs,
         )
         trainer.init_workers()
-        #breakpoint()
+        breakpoint()
         #pdb.set_trace()
         trainer.fit()
 

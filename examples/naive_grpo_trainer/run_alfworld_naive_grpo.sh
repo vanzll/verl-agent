@@ -13,10 +13,10 @@ python3 -m examples.data_preprocess.prepare \
     --mode 'text' \
     --train_data_size $train_data_size \
     --val_data_size $val_data_size
-# if algorithm.adv_estimator is grpo, and algorithm.norm_adv_by_std_in_grpo is False, then the algorithm is naive_grpo
+# if algorithm.adv_estimator is grpo, and algorithm.compute_mean_std_cross_steps is False, then the algorithm is naive_grpo
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    algorithm.compute_mean_std_cross_steps=False \
+    +algorithm.compute_mean_std_cross_steps=False \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
