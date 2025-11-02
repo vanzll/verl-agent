@@ -18,7 +18,7 @@ python3 -m examples.data_preprocess.prepare \
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=advanced_grpo \
     +algorithm.compute_mean_std_cross_steps=True \
-    +actor_rollout_ref.actor.loss_agg_mode='seq-mean-token-sum' \
+    actor_rollout_ref.actor.loss_agg_mode='seq-mean-token-sum' \
     +algorithm.memory_optimize=False\
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
