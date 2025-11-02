@@ -37,7 +37,7 @@ def run_ppo(config) -> None:
                                       "NCCL_DEBUG": "WARN", 
                                       "VLLM_LOGGING_LEVEL": "WARN", 
                                       "VLLM_ALLOW_RUNTIME_LORA_UPDATING": "true",
-                                      "RAY_DEBUG": "1"}},
+                                      "RAY_DEBUG": "0"}},
             num_cpus=config.ray_init.num_cpus,
         )
 
