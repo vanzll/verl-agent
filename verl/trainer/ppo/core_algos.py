@@ -666,7 +666,7 @@ def agg_loss(loss_mat: torch.Tensor, loss_mask: torch.Tensor, loss_agg_mode: str
     """
     if loss_agg_mode == "token-mean":
         loss = verl_F.masked_mean(loss_mat, loss_mask)
-    elif loss_agg_mode == "seq-mean-token-sum":
+    elif loss_agg_mode == "seq-mean-token-sum": # seems to only have the scale difference with token-mean of each token
         seq_losses = torch.sum(loss_mat * loss_mask, dim=-1)  # token-sum
         loss = torch.mean(seq_losses)  # seq-mean
     elif loss_agg_mode == "seq-mean-token-mean":

@@ -1164,7 +1164,7 @@ class RayPPOTrainer:
                     del batch
                     batch = gen_batch_output
 
-                    if self.config.algorithm.adv_estimator == AdvantageEstimator.GiGPO:
+                    if self.config.algorithm.adv_estimator == AdvantageEstimator.GiGPO or self.config.algorithm.adv_estimator == AdvantageEstimator.ADVANCED_GiGPO:
                         step_rewards_tensor = core_gigpo.compute_step_discounted_returns(
                             batch=batch,
                             gamma=self.config.algorithm.gamma
