@@ -13,10 +13,14 @@ python3 -m examples.data_preprocess.prepare \
     --mode 'text' \
     --train_data_size $train_data_size \
     --val_data_size $val_data_size
-
+#actor_rollout_ref.actor.loss_agg_mode='seq-mean-token-sum' means compute the loss in step level (mathematically WIP)
+#algorithm.compute_mean_std_cross_steps=True means compute the advantage in step level
+#algorithm.adv_estimator=advanced_grpo means use the token-level advantage computation
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=advanced_grpo \
-    +algorithm.memory_optimize=True \
+    algorithm.adv_estimator=grpo \
+    +algorithm.compute_mean_std_cross_steps=True \
+    actor_rollout_ref.actor.loss_agg_mode='seq-mean-token-sum' \
+    +algorithm.memory_optimize=False\
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -59,7 +63,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='advanced_grpo_qwen2.5_1.5b' \
+    trainer.experiment_name='grpo_qwen2.5_1.5b(A:Step,L:Step)' \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \

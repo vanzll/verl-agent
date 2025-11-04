@@ -1,16 +1,13 @@
 set -x
 ENGINE=${1:-vllm}
 export VLLM_ATTENTION_BACKEND=XFORMERS
-<<<<<<< HEAD
 export CUDA_VISIBLE_DEVICES=0,1
-=======
-export CUDA_VISIBLE_DEVICES=0
->>>>>>> b9039eadd9bb496e00275a3c6cb58847ac0c9ea8
 num_cpus_per_env_worker=0.1 # The CPU resource allocated for each environment worker. If you want to use less CPU resources, you can decrease this value.
 
-train_data_size=8
-val_data_size=64
+train_data_size=16
+val_data_size=128
 group_size=8
+mode="mean_std_norm" # "mean_norm" or "mean_std_norm"
 
 # We only use data preparation to indicate the modality and the data size.
 python3 -m examples.data_preprocess.prepare \
@@ -19,7 +16,7 @@ python3 -m examples.data_preprocess.prepare \
     --val_data_size $val_data_size
 
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=advanced_grpo \
+    algorithm.adv_estimator=advanced_gigpo \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -54,6 +51,9 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
     actor_rollout_ref.actor.invalid_action_penalty_coef=0.1 \
     algorithm.use_kl_in_reward=False \
+    algorithm.gamma=0.95 \
+    algorithm.gigpo.step_advantage_w=1.0 \
+    algorithm.gigpo.mode=$mode \
     env.env_name=alfworld/AlfredTWEnv \
     env.seed=0 \
     env.max_steps=50 \
@@ -62,12 +62,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='test' \
-<<<<<<< HEAD
+    trainer.experiment_name='debug' \
     trainer.n_gpus_per_node=2 \
-=======
-    trainer.n_gpus_per_node=1 \
->>>>>>> b9039eadd9bb496e00275a3c6cb58847ac0c9ea8
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \
