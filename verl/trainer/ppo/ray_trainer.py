@@ -95,6 +95,7 @@ class AdvantageEstimator(str, Enum):
     RLOO = "rloo"
     GRPO_PASSK = "grpo_passk"
     GiGPO = 'gigpo'
+    ADVANCED_GiGPO = 'advanced_gigpo'
 
 
 @dataclass
@@ -390,6 +391,21 @@ def compute_advantage(data: DataProto, adv_estimator,
             )
         data.batch['advantages'] = advantages
         data.batch['returns'] = returns
+    elif adv_estimator == AdvantageEstimator.ADVANCED_GiGPO:
+        advantages, returns = core_gigpo.compute_advanced_gigpo_outcome_advantage(
+            token_level_rewards=data.batch['token_level_rewards'],
+            step_rewards=data.batch['step_rewards'],
+            response_mask=data.batch['response_mask'],
+            anchor_obs=data.non_tensor_batch['anchor_obs'],
+            index=data.non_tensor_batch['uid'],
+            traj_index=data.non_tensor_batch['traj_uid'],
+            step_advantage_w=step_advantage_w,
+            mode=gigpo_mode,
+            enable_similarity=gigpo_enable_similarity,
+            similarity_thresh=gigpo_similarity_thresh,
+        )
+        data.batch['advantages'] = advantages
+        data.batch['returns'] = returns
     else:
         raise NotImplementedError
     return data
@@ -486,7 +502,8 @@ class RayPPOTrainer:
             AdvantageEstimator.REMAX,
             AdvantageEstimator.RLOO,
             AdvantageEstimator.REINFORCE_PLUS_PLUS_BASELINE,
-            AdvantageEstimator.GiGPO
+            AdvantageEstimator.GiGPO,
+            AdvantageEstimator.ADVANCED_GiGPO,
         ]:
             self.use_critic = False
         else:

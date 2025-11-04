@@ -383,3 +383,127 @@ def step_norm_reward(step_rewards: torch.Tensor,
     
     return step_advantages
 
+
+def _step_token_norm_reward(step_rewards: torch.Tensor,
+                            response_mask: torch.Tensor,
+                            step_group_uids: np.array,
+                            epsilon: float = 1e-6,
+                            remove_std: bool = True,
+                            ) -> torch.Tensor:
+    """
+    Advanced (token-level) step advantage:
+    1) Broadcast per-step reward to all valid tokens in the sample
+    2) Within each step group, compute token-level mean (and std if needed)
+    3) Normalize each token's reward by the group stats so that each group's token advantages sum to ~0
+
+    Args:
+        step_rewards: (bs,) scalar reward per sample's step-group item
+        response_mask: (bs, response_length) mask of valid tokens
+        step_group_uids: (bs,) step-level group id per sample (e.g., from build_step_group)
+
+    Returns:
+        advantages: (bs, response_length) token-level, masked
+    """
+    device = response_mask.device
+    response_length = response_mask.shape[-1]
+
+    # 1) broadcast to tokens per sample
+    token_level_rewards = step_rewards.to(device=device, dtype=torch.float32).unsqueeze(-1).expand(-1, response_length)
+    token_level_rewards = token_level_rewards * response_mask
+
+    # 2) collect tokens per step group
+    id2tokens: Dict[Any, List[float]] = defaultdict(list)
+    bsz = response_mask.shape[0]
+    with torch.no_grad():
+        for i in range(bsz):
+            valid_mask = response_mask[i] > 0
+            vals = token_level_rewards[i, valid_mask]
+            if vals.numel() == 0:
+                continue
+            id2tokens[step_group_uids[i]].extend(vals.detach().tolist())
+
+        # compute group mean/std over tokens
+        id2mean: Dict[Any, torch.Tensor] = {}
+        id2std: Dict[Any, torch.Tensor] = {}
+        for gid, arr in id2tokens.items():
+            t = torch.tensor(arr, dtype=torch.float32, device=device)
+            if t.numel() <= 1:
+                # single token -> zero advantage
+                id2mean[gid] = t.mean() if t.numel() == 1 else torch.tensor(0.0, device=device)
+                id2std[gid] = torch.tensor(1.0, device=device)
+            else:
+                id2mean[gid] = t.mean()
+                id2std[gid] = t.std()
+
+    # 3) normalize per token by group stats
+    advantages = torch.zeros_like(token_level_rewards)
+    for i in range(bsz):
+        gid = step_group_uids[i]
+        if gid not in id2mean:
+            # no valid tokens observed for this group in this minibatch
+            continue
+        if remove_std:
+            adv_i = token_level_rewards[i] - id2mean[gid]
+        else:
+            adv_i = (token_level_rewards[i] - id2mean[gid]) / (id2std[gid] + epsilon)
+        advantages[i] = adv_i * response_mask[i]
+
+    return advantages
+
+
+def compute_advanced_gigpo_outcome_advantage(token_level_rewards: torch.Tensor,
+                                             step_rewards: torch.Tensor,
+                                             response_mask: torch.Tensor,
+                                             anchor_obs: np.array,
+                                             index: np.array,
+                                             traj_index: np.array,
+                                             epsilon: float = 1e-6,
+                                             step_advantage_w: float = 1.0,
+                                             mode: str = "mean_norm",
+                                             enable_similarity: bool = False,
+                                             similarity_thresh: float = 0.95,
+                                             ):
+    """
+    Advanced GiGPO: token-level advantages for both episode-group and step-group, then add.
+
+    - advantage1: Advanced GRPO style (broadcast episode reward to tokens, then token-level normalize within uid)
+    - advantage2: Advanced step-group style (broadcast step reward to tokens, then token-level normalize within step-group)
+
+    Returns:
+        (advantages, returns): each is (bs, response_length)
+    """
+    if mode == "mean_std_norm":
+        remove_std = False
+    elif mode == "mean_norm":
+        remove_std = True
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+    # 1) episode-level token normalization using existing Advanced GRPO
+    from verl.trainer.ppo.core_algos import compute_advanced_grpo_outcome_advantage as _adv_grpo
+
+    advantage1, _ = _adv_grpo(
+        episode_rewards=None,
+        response_mask=response_mask,
+        index=index,
+        traj_index=traj_index,
+        epsilon=epsilon,
+        norm_adv_by_std_in_grpo=(not remove_std),
+        token_level_rewards=token_level_rewards,
+        memory_optimize=False,
+    )
+
+    # 2) step-level token normalization
+    step_group_uids = build_step_group(anchor_obs, index, enable_similarity, similarity_thresh)
+    advantage2 = _step_token_norm_reward(
+        step_rewards=step_rewards,
+        response_mask=response_mask,
+        step_group_uids=step_group_uids,
+        epsilon=epsilon,
+        remove_std=remove_std,
+    )
+
+    # 3) combine
+    advantages = advantage1 + step_advantage_w * advantage2
+    return advantages, advantages
+
