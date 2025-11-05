@@ -461,7 +461,8 @@ def compute_advanced_gigpo_outcome_advantage(token_level_rewards: torch.Tensor,
                                              step_advantage_w: float = 1.0,
                                              mode: str = "mean_norm",
                                              enable_similarity: bool = False,
-                                             similarity_thresh: float = 0.95,
+                                              similarity_thresh: float = 0.95,
+                                              enforce_zero_mean: bool = False,
                                              ):
     """
     Advanced GiGPO: token-level advantages for both episode-group and step-group, then add.
@@ -505,5 +506,15 @@ def compute_advanced_gigpo_outcome_advantage(token_level_rewards: torch.Tensor,
 
     # 3) combine
     advantages = advantage1 + step_advantage_w * advantage2
+
+    # Final safety (optional): enforce global token-weighted zero-mean
+    if enforce_zero_mean:
+        with torch.no_grad():
+            resp_mask_f64 = response_mask.to(dtype=torch.float64)
+            adv_f64 = advantages.to(dtype=torch.float64)
+            denom = resp_mask_f64.sum()
+            if denom > 0:
+                mean_adv = (adv_f64 * resp_mask_f64).sum() / denom
+                advantages -= mean_adv.to(dtype=advantages.dtype)
     return advantages, advantages
 

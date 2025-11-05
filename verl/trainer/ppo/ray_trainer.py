@@ -247,7 +247,7 @@ def compute_advantage(data: DataProto, adv_estimator,
                       gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, 
                       norm_adv_by_std_in_grpo=True, step_advantage_w=1.0, 
                       gigpo_mode="mean_std_norm", gigpo_enable_similarity=False, gigpo_similarity_thresh=0.95, 
-                      compute_mean_std_cross_steps=True, memory_optimize=False, **kwargs):
+                      compute_mean_std_cross_steps=True, memory_optimize=False, gigpo_enforce_zero_mean=False, **kwargs):
     """Compute advantage estimates for policy optimization.
 
     This function computes advantage estimates using various estimators like GAE, GRPO, REINFORCE++, etc.
@@ -403,6 +403,7 @@ def compute_advantage(data: DataProto, adv_estimator,
             mode=gigpo_mode,
             enable_similarity=gigpo_enable_similarity,
             similarity_thresh=gigpo_similarity_thresh,
+            enforce_zero_mean=gigpo_enforce_zero_mean,
         )
         data.batch['advantages'] = advantages
         data.batch['returns'] = returns
@@ -1291,6 +1292,7 @@ class RayPPOTrainer:
                             gigpo_similarity_thresh=self.config.algorithm.gigpo.similarity_thresh,
                             compute_mean_std_cross_steps=compute_mean_std_cross_steps,
                             memory_optimize=self.config.algorithm.get("memory_optimize", False),
+                                gigpo_enforce_zero_mean=self.config.algorithm.gigpo.get("enforce_zero_mean", False),
                         )
                         # breakpoint of ray
                         breakpoint()

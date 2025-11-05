@@ -17,6 +17,7 @@ python3 -m examples.data_preprocess.prepare \
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=advanced_gigpo \
+    algorithm.gigpo.enforce_zero_mean=True \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -62,7 +63,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='advanced_gigpo_qwen2.5_1.5b_A_token_L_token' \
+    trainer.experiment_name='advanced_gigpo_qwen2.5_1.5b_A_token_L_token_enforce_zero_adv_mean' \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
