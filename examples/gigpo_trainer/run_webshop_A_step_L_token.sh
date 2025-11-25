@@ -17,8 +17,8 @@ python3 -m examples.data_preprocess.prepare \
     --val_data_size $((val_data_size * 2)) # evaluate 2 × val_data_size tasks during each iteration
 
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=advanced_gigpo \
-    algorithm.gigpo.enforce_zero_mean=True \
+    algorithm.adv_estimator=gigpo \
+    algorithm.gigpo.enforce_zero_mean=False \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -64,7 +64,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_webshop' \
-    trainer.experiment_name='gigpo_qwen2.5_1.5b_A_token_L_token_30envsteps' \
+    trainer.experiment_name='gigpo_qwen2.5_1.5b_A_Step_L_token_30envsteps' \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
