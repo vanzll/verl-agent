@@ -1,11 +1,7 @@
 set -x
 ENGINE=${1:-vllm}
 export VLLM_ATTENTION_BACKEND=XFORMERS
-<<<<<<< HEAD
-export CUDA_VISIBLE_DEVICES=0,1
-=======
 export CUDA_VISIBLE_DEVICES=0
->>>>>>> b9039eadd9bb496e00275a3c6cb58847ac0c9ea8
 num_cpus_per_env_worker=0.1 # The CPU resource allocated for each environment worker. If you want to use less CPU resources, you can decrease this value.
 
 train_data_size=8
