@@ -17,8 +17,8 @@ python3 -m examples.data_preprocess.prepare \
     --val_data_size $val_data_size
 # grpo + compute_mean_std_cross_steps=False = A_traj_L_token, grpo + compute_mean_std_cross_steps=True = A_Step_L_token, advanced grpo = A_token_L_token
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=advanced_grpo \
-    +algorithm.compute_mean_std_cross_steps=False \
+    algorithm.adv_estimator=grpo \
+    +algorithm.compute_mean_std_cross_steps=True \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -55,16 +55,16 @@ python3 -m verl.trainer.main_ppo \
     algorithm.use_kl_in_reward=False \
     env.env_name=Webshop \
     env.seed=0 \
-    env.max_steps=15 \
+    env.max_steps=30 \
     env.rollout.n=$group_size \
     env.resources_per_worker.num_cpus=$num_cpus_per_env_worker \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_webshop' \
-    trainer.experiment_name='grpo_qwen2.5_1.5b_A_token_L_token' \
+    trainer.experiment_name='grpo_qwen2.5_1.5b_A_Step_L_token' \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \
-    trainer.total_epochs=150 \
+    trainer.total_epochs=250 \
     trainer.val_before_train=True $@
