@@ -1,6 +1,6 @@
 set -x
 ENGINE=${1:-vllm}
-ulimit -u 65536
+#ulimit -u 65536
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export CUDA_VISIBLE_DEVICES=0,1
 num_cpus_per_env_worker=0.1 # The CPU resource allocated for each environment worker. If you want to use less CPU resources, you can decrease this value.
@@ -40,7 +40,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=16 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=4 \
     actor_rollout_ref.rollout.name=$ENGINE \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
@@ -64,8 +64,13 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_webshop' \
+<<<<<<< HEAD
     trainer.experiment_name='gigpo_qwen2.5_1.5b_A_token_L_token_30envsteps' \
     trainer.n_gpus_per_node=2 \
+=======
+    trainer.experiment_name='gigpo_qwen2.5_1.5b_A_token_L_token' \
+    trainer.n_gpus_per_node=4 \
+>>>>>>> 3861f234c1c1bf60c5703e88e651805c55b2ed55
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \

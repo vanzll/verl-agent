@@ -750,6 +750,113 @@ def compute_policy_loss(
     return pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower
 
 
+def compute_policy_loss_gtpo(
+    old_log_prob: torch.Tensor,
+    log_prob: torch.Tensor,
+    advantages: torch.Tensor,
+    response_mask: torch.Tensor,
+    traj_index,
+    cliprange=None,
+    cliprange_low=None,
+    cliprange_high=None,
+    clip_ratio_c: float = 3.0,
+):
+    """
+    Compute GTPO loss by treating a whole trajectory (multiple steps) as one "sequence"
+    for GSPO: concatenate all valid tokens from all steps in the trajectory logically,
+    compute a single sequence-level importance ratio per trajectory, and apply it to
+    every token in that trajectory.
+
+    This function expects that the current mini-batch may contain multiple samples that
+    belong to the same trajectory, identified by `traj_index`. Each sample corresponds
+    to a step, and `response_mask` indicates valid tokens within that step.
+
+    Args:
+        old_log_prob (torch.Tensor):
+            shape (bs, response_length) — old policy log-probabilities.
+        log_prob (torch.Tensor):
+            shape (bs, response_length) — current policy log-probabilities.
+        advantages (torch.Tensor):
+            shape (bs, response_length) — per-token (or broadcast) advantages.
+        response_mask (torch.Tensor):
+            shape (bs, response_length) — mask of valid response tokens.
+        traj_index:
+            1D array-like of length bs — trajectory id per sample (e.g., np.ndarray of str/object or int).
+        cliprange / cliprange_low / cliprange_high:
+            GSPO-style clipping ranges. If low/high are None, they default to cliprange.
+        clip_ratio_c (float):
+            Lower bound of the ratio for dual-clip PPO. Must be > 1.0. Kept for API symmetry, not used here.
+
+    Returns:
+        pg_loss (torch.Tensor): scalar policy loss aggregated per-trajectory
+        pg_clipfrac (torch.Tensor): masked mean fraction of clipped elements (upper/lower) at token level
+        ppo_kl (torch.Tensor): masked mean approximate KL (for logging)
+        pg_clipfrac_lower (torch.Tensor): placeholder zero tensor for compatibility with APIs using dual-clip
+    """
+    assert clip_ratio_c > 1.0, "clip_ratio_c should be greater than 1.0."
+    if cliprange_low is None:
+        cliprange_low = cliprange
+    if cliprange_high is None:
+        cliprange_high = cliprange
+
+    device = log_prob.device
+
+    # Map trajectory ids to compact integer group ids [0..num_groups-1]
+    # traj_index is expected to be a numpy array or list-like of length bs
+    if isinstance(traj_index, torch.Tensor):
+        traj_index = traj_index.detach().cpu().numpy()
+    _, inv = np.unique(traj_index, return_inverse=True)
+    group_id = torch.from_numpy(inv).to(device=device, dtype=torch.long)  # (bs,)
+    num_groups = int(group_id.max().item() + 1) if group_id.numel() > 0 else 0
+
+    negative_approx_kl = log_prob - old_log_prob  # (bs, T)
+
+    # Trajectory-level "sequence" KL: average over ALL valid tokens across all steps of the trajectory
+    # 1) Per-sample sums and counts
+    per_sample_token_sum = torch.sum(negative_approx_kl * response_mask, dim=-1)  # (bs,)
+    per_sample_token_cnt = torch.sum(response_mask, dim=-1)  # (bs,)
+
+    # 2) Scatter-add to trajectory groups
+    traj_token_sum = torch.zeros(num_groups, device=device, dtype=per_sample_token_sum.dtype)
+    traj_token_cnt = torch.zeros(num_groups, device=device, dtype=per_sample_token_cnt.dtype)
+    traj_token_sum.scatter_add_(0, group_id, per_sample_token_sum)
+    traj_token_cnt.scatter_add_(0, group_id, per_sample_token_cnt)
+
+    # 3) Trajectory-average KL (guard against zero)
+    traj_avg_kl = traj_token_sum / torch.clamp(traj_token_cnt, min=1)
+
+    # Build per-token sequence-importance ratio using stop-grad on the trajectory-level term
+    # log(s_i,t(θ)) = (log_prob - sg[log_prob]) + sg[traj_avg_kl]
+    log_seq_importance_ratio = log_prob - log_prob.detach() + traj_avg_kl[group_id].detach().unsqueeze(-1)
+    log_seq_importance_ratio = torch.clamp(log_seq_importance_ratio, max=10.0)  # numerical stability
+    seq_importance_ratio = torch.exp(log_seq_importance_ratio)
+
+    # GSPO clipping at token level, with common trajectory-level ratio
+    pg_losses1 = -advantages * seq_importance_ratio
+    pg_losses2 = -advantages * torch.clamp(seq_importance_ratio, 1 - cliprange_low, 1 + cliprange_high)
+    pg_losses = torch.maximum(pg_losses1, pg_losses2)  # (bs, T)
+
+    # Aggregate per-trajectory:
+    # For each trajectory, compute mean over all valid tokens across its steps.
+    per_sample_loss_sum = torch.sum(pg_losses * response_mask, dim=-1)  # (bs,)
+    per_sample_tok_cnt = per_sample_token_cnt  # reuse
+
+    traj_loss_sum = torch.zeros(num_groups, device=device, dtype=per_sample_loss_sum.dtype)
+    traj_tok_cnt = torch.zeros(num_groups, device=device, dtype=per_sample_tok_cnt.dtype)
+    traj_loss_sum.scatter_add_(0, group_id, per_sample_loss_sum)
+    traj_tok_cnt.scatter_add_(0, group_id, per_sample_tok_cnt)
+
+    traj_mean_loss = traj_loss_sum / torch.clamp(traj_tok_cnt, min=1)
+    pg_loss = traj_mean_loss.mean() if num_groups > 0 else torch.tensor(0.0, device=device, dtype=per_sample_loss_sum.dtype)
+
+    # Token-level metrics for logging consistency
+    pg_clipfrac = verl_F.masked_mean(torch.gt(pg_losses2, pg_losses1).float(), response_mask)
+    pg_clipfrac_lower = torch.tensor(0.0, device=device, dtype=pg_loss.dtype)
+    ppo_kl = verl_F.masked_mean(-negative_approx_kl, response_mask)
+
+    return pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower
+
+
 def compute_policy_loss_gspo(
     old_log_prob: torch.Tensor,
     log_prob: torch.Tensor,
