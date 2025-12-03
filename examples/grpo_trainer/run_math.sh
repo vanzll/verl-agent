@@ -4,12 +4,6 @@ train_data_size=32
 val_data_size=128
 group_size=8
 
-# We only use data preparation to indicate the modality and the data size.
-python3 -m examples.data_preprocess.prepare \
-    --mode 'text' \
-    --train_data_size $train_data_size \
-    --val_data_size $val_data_size
-
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files=$HOME/data/verl_agent_math/train.parquet \
