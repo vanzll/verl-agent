@@ -74,9 +74,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \
-<<<<<<< HEAD:examples/gspo_trainer/run_alfworld_adv_Traj_loss_S.sh
-    trainer.total_epochs=150 \
-=======
     trainer.total_epochs=250 \
->>>>>>> 3861f234c1c1bf60c5703e88e651805c55b2ed55:examples/gspo_trainer/run_alfworld_adv_Traj_loss_S copy.sh
     trainer.val_before_train=True $@

@@ -1,8 +1,11 @@
 set -x
-
+export CUDA_VISIBLE_DEVICES=0,1
 train_data_size=32
 val_data_size=128
 group_size=8
+loss_mode="gspo"
+
+
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -16,6 +19,7 @@ python3 -m verl.trainer.main_ppo \
     data.truncation='error' \
     data.return_raw_chat=True \
     +data.apply_chat_template_kwargs.enable_thinking=False \
+    actor_rollout_ref.actor.policy_loss.loss_mode=$loss_mode \
     actor_rollout_ref.model.path=Qwen/Qwen3-4B \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -41,10 +45,10 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_math' \
-    trainer.experiment_name='grpo_qwen3_4b' \
+    trainer.experiment_name='grpo_qwen3_4b_A_step_L_step' \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
-    trainer.save_freq=-1 \
+    trainer.save_freq=500 \
     trainer.test_freq=5 \
     trainer.total_epochs=2 \
     trainer.val_before_train=True $@

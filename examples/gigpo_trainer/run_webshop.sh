@@ -64,13 +64,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_webshop' \
-<<<<<<< HEAD
     trainer.experiment_name='gigpo_qwen2.5_1.5b_A_token_L_token_30envsteps' \
     trainer.n_gpus_per_node=2 \
-=======
-    trainer.experiment_name='gigpo_qwen2.5_1.5b_A_token_L_token' \
-    trainer.n_gpus_per_node=4 \
->>>>>>> 3861f234c1c1bf60c5703e88e651805c55b2ed55
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \
