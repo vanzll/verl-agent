@@ -59,11 +59,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
     trainer.experiment_name='test' \
-<<<<<<< HEAD
     trainer.n_gpus_per_node=2 \
-=======
-    trainer.n_gpus_per_node=1 \
->>>>>>> b9039eadd9bb496e00275a3c6cb58847ac0c9ea8
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \

@@ -22,26 +22,34 @@ import logging
 import os
 from typing import Tuple
 
+import numpy as np
 import torch
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 import verl.utils.torch_functional as verl_F
 from verl import DataProto
-from verl.trainer.ppo.core_algos import agg_loss, compute_policy_loss, compute_policy_loss_gspo, compute_policy_loss_gtpo, kl_penalty
+from verl.trainer.ppo.core_algos import (agg_loss, compute_policy_loss,
+                                         compute_policy_loss_gspo,
+                                         compute_policy_loss_gtpo, kl_penalty)
 from verl.utils.debug import GPUMemoryLogger
-from verl.utils.device import get_device_name, get_torch_device, is_cuda_available, is_npu_available
+from verl.utils.device import (get_device_name, get_torch_device,
+                               is_cuda_available, is_npu_available)
 from verl.utils.fsdp_utils import FSDPModule, fsdp2_clip_grad_norm_
 from verl.utils.py_functional import append_to_dict
-from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
+from verl.utils.seqlen_balancing import (get_reverse_idx,
+                                         rearrange_micro_batches)
 from verl.utils.torch_functional import logprobs_from_logits
-from verl.utils.ulysses import gather_outpus_and_unpad, ulysses_pad_and_slice_inputs, ulysses_pad
+from verl.utils.ulysses import (gather_outpus_and_unpad, ulysses_pad,
+                                ulysses_pad_and_slice_inputs)
 from verl.workers.actor import BasePPOActor
 
 if is_cuda_available:
-    from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
+    from flash_attn.bert_padding import (index_first_axis, pad_input,
+                                         rearrange, unpad_input)
 elif is_npu_available:
-    from transformers.integrations.npu_flash_attention import index_first_axis, pad_input, rearrange, unpad_input
+    from transformers.integrations.npu_flash_attention import (
+        index_first_axis, pad_input, rearrange, unpad_input)
 
 
 __all__ = ["DataParallelPPOActor"]
@@ -49,6 +57,108 @@ __all__ = ["DataParallelPPOActor"]
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
+
+def split_micro_batches_by_trajectory(mini_batch, target_micro_batch_size, traj_uid_key="traj_uid", traj_uids=None):
+    """
+    Split mini-batch into micro-batches, but ensure that trajectories (identified by traj_uid)
+    are not split across micro-batches.
+    
+    Args:
+        mini_batch: DataProto or TensorDict
+        target_micro_batch_size: int
+        traj_uid_key: str, key to look for in non_tensor_batch if traj_uids is None
+        traj_uids: Optional[np.ndarray], if provided, use this instead of looking up in mini_batch
+    """
+    # If using dynamic bsz, we don't support trajectory-aware splitting yet
+    # because rearrange_micro_batches logic is complex.
+    # Users should disable use_dynamic_bsz for GTPO if they want strict correctness.
+    
+    # Resolve traj_uids
+    if traj_uids is None:
+        # Try to get from DataProto
+        if hasattr(mini_batch, "non_tensor_batch") and traj_uid_key in mini_batch.non_tensor_batch:
+            traj_uids = mini_batch.non_tensor_batch[traj_uid_key]
+        else:
+            # Fallback to standard split if no traj info available
+            return mini_batch.split(target_micro_batch_size)
+
+    total_size = len(traj_uids)
+    
+    micro_batches = []
+    start_idx = 0
+    
+    # Check if mini_batch is DataProto or TensorDict to determine how to slice
+    is_dataproto = hasattr(mini_batch, "non_tensor_batch")
+    
+    while start_idx < total_size:
+        # Proposed end index
+        end_idx = min(start_idx + target_micro_batch_size, total_size)
+        
+        # If we reached the end, just take it
+        if end_idx == total_size:
+            pass
+        else:
+            # Check boundary: if the trajectory at end_idx-1 is the same as end_idx,
+            # we are splitting a trajectory.
+            curr_uid = traj_uids[end_idx - 1]
+            next_uid = traj_uids[end_idx]
+            
+            if curr_uid == next_uid:
+                # We are in the middle of a trajectory.
+                # Look forward to include the rest of this trajectory
+                # Strategy: Look forward (greedy inclusion)
+                scan_idx = end_idx
+                while scan_idx < total_size and traj_uids[scan_idx] == curr_uid:
+                    scan_idx += 1
+                end_idx = scan_idx
+                
+        # Slice the batch
+        if is_dataproto:
+            # Manual slicing for DataProto
+            slice_batch = {}
+            for k, v in mini_batch.batch.items():
+                slice_batch[k] = v[start_idx:end_idx]
+                
+            slice_non_tensor = {}
+            for k, v in mini_batch.non_tensor_batch.items():
+                if isinstance(v, (list, tuple)):
+                     slice_non_tensor[k] = v[start_idx:end_idx]
+                elif isinstance(v, np.ndarray):
+                     slice_non_tensor[k] = v[start_idx:end_idx]
+                else:
+                     pass
+
+            from verl.protocol import DataProto 
+            mb = DataProto(batch=slice_batch, non_tensor_batch=slice_non_tensor, meta_info=mini_batch.meta_info)
+            micro_batches.append(mb)
+        else:
+            # TensorDict slicing (assuming it supports slicing or we use split logic simulation)
+            # TensorDict usually supports slicing: mini_batch[start:end]
+            # But mini_batch here might be a TensorDict object from tensordict lib or a dict-like wrapper
+            # Based on usage `mini_batch.split`, it seems to be our internal TensorDict or similar.
+            # Let's try direct slicing which is safer if implemented, 
+            # or manual construction if it's a simple dict.
+            
+            # Assuming it behaves like the TensorDict in verl.protocol (which wraps dict of tensors)
+            # If it supports slicing:
+            try:
+                mb = mini_batch[start_idx:end_idx]
+            except TypeError:
+                # Fallback: manual slice if __getitem__ slice not supported
+                # But verl TensorDict usually supports it.
+                # Re-implement simple slicing just in case
+                sliced_data = {k: v[start_idx:end_idx] for k, v in mini_batch.items()}
+                # We need to return same type as mini_batch
+                mb = type(mini_batch)(sliced_data) 
+                # Note: TensorDict constructor might need more args, but usually data dict is enough
+                # If it fails, we might need to look deeper into TensorDict implementation.
+                # But `mini_batch.split` works, so likely it's well behaved.
+            
+            micro_batches.append(mb)
+        
+        start_idx = end_idx
+
+    return micro_batches
 
 class DataParallelPPOActor(BasePPOActor):
     def __init__(self, config, actor_module: nn.Module, actor_optimizer: torch.optim.Optimizer = None):
@@ -347,6 +457,7 @@ class DataParallelPPOActor(BasePPOActor):
             for batch_idx, data in enumerate(dataloader):
                 # split batch into micro_batches
                 mini_batch = data
+                traj_uid_for_minibatch = None # Initialize to avoid UnboundLocalError
                 if has_multi_modal_inputs:
                     self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
                     num_micro_batches = mini_batch.batch.batch_size[0] // self.config.ppo_micro_batch_size_per_gpu
@@ -357,7 +468,17 @@ class DataParallelPPOActor(BasePPOActor):
                 else:
                     self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
                     # split batch into micro_batches
-                    micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
+                    loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
+                    if loss_mode == "gtpo":
+                         # Special splitting for GTPO to keep trajectories intact
+                         micro_batches = split_micro_batches_by_trajectory(
+                             mini_batch, 
+                             self.config.ppo_micro_batch_size_per_gpu,
+                             traj_uid_key="traj_uid",
+                             traj_uids=traj_uid_for_minibatch if not has_multi_modal_inputs and traj_uid_all is not None else None
+                         )
+                    else:
+                         micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
                 self.actor_optimizer.zero_grad()
 

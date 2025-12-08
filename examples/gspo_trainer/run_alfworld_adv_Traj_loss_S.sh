@@ -21,7 +21,8 @@ python3 -m examples.data_preprocess.prepare \
     --val_data_size $val_data_size
 
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=advanced_grpo \
+    algorithm.adv_estimator=grpo \
+    +algorithm.compute_mean_std_cross_steps=False \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -68,7 +69,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='gspo_qwen2.5_1.5b_A_Token_L_Step' \
+    trainer.experiment_name='gspo_qwen2.5_1.5b_A_Traj_L_Step' \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
