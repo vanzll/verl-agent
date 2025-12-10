@@ -25,6 +25,8 @@ def to_numpy(data):
         data = data.detach().cpu().numpy()
     elif isinstance(data, np.ndarray):
         pass
+    elif isinstance(data, (np.bool_, np.bool)):
+        data = bool(data)
     elif isinstance(data, (int, float, bool, Tuple, List)):
         data = np.array(data)
     else:
