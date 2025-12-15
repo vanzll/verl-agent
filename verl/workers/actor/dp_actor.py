@@ -449,7 +449,9 @@ class DataParallelPPOActor(BasePPOActor):
                 non_tensor_select_keys.append("traj_uid")
             dataloader = data.select(select_keys, non_tensor_select_keys).chunk(num_mini_batches)
         else:
-            dataloader = batch.split(self.config.ppo_mini_batch_size)
+            #dataloader = batch.split(self.config.ppo_mini_batch_size)
+            dataloader = split_micro_batches_by_trajectory(batch, self.config.ppo_mini_batch_size, traj_uid_key="traj_uid", traj_uids=traj_uid_all)
+
 
         metrics = {}
         for epoch in range(self.config.ppo_epochs):
@@ -471,12 +473,13 @@ class DataParallelPPOActor(BasePPOActor):
                     loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
                     if loss_mode == "gtpo":
                          # Special splitting for GTPO to keep trajectories intact
-                         micro_batches = split_micro_batches_by_trajectory(
-                             mini_batch, 
-                             self.config.ppo_micro_batch_size_per_gpu,
-                             traj_uid_key="traj_uid",
-                             traj_uids=traj_uid_for_minibatch if not has_multi_modal_inputs and traj_uid_all is not None else None
-                         )
+                         # micro_batches = split_micro_batches_by_trajectory(
+                         #    mini_batch, 
+                         #    self.config.ppo_micro_batch_size_per_gpu,
+                         #    traj_uid_key="traj_uid",
+                         #    traj_uids=traj_uid_for_minibatch if not has_multi_modal_inputs and traj_uid_all is not None else None
+                         #)
+                         micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
                     else:
                          micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 

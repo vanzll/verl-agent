@@ -1292,7 +1292,7 @@ class RayPPOTrainer:
                             gigpo_similarity_thresh=self.config.algorithm.gigpo.similarity_thresh,
                             compute_mean_std_cross_steps=compute_mean_std_cross_steps,
                             memory_optimize=self.config.algorithm.get("memory_optimize", False),
-                                gigpo_enforce_zero_mean=self.config.algorithm.gigpo.get("enforce_zero_mean", False),
+                            gigpo_enforce_zero_mean=self.config.algorithm.gigpo.get("enforce_zero_mean", False),
                         )
                         # breakpoint of ray
                         breakpoint()
