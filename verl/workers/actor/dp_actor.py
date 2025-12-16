@@ -24,6 +24,7 @@ from typing import Tuple
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
@@ -473,15 +474,16 @@ class DataParallelPPOActor(BasePPOActor):
                     loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
                     if loss_mode == "gtpo":
                          # Special splitting for GTPO to keep trajectories intact
-                         # micro_batches = split_micro_batches_by_trajectory(
-                         #    mini_batch, 
-                         #    self.config.ppo_micro_batch_size_per_gpu,
-                         #    traj_uid_key="traj_uid",
-                         #    traj_uids=traj_uid_for_minibatch if not has_multi_modal_inputs and traj_uid_all is not None else None
-                         #)
-                         micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
+                        micro_batches = split_micro_batches_by_trajectory(
+                             mini_batch, 
+                             self.config.ppo_micro_batch_size_per_gpu,
+                             traj_uid_key="traj_uid",
+                             traj_uids=traj_uid_for_minibatch if not has_multi_modal_inputs and traj_uid_all is not None else None
+                         )
+                        # one microbatch may contains multiple intact traj, and the length may exceed the microbatch size, may OOM
+                        #micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
                     else:
-                         micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
+                        micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
                 self.actor_optimizer.zero_grad()
 
@@ -492,7 +494,24 @@ class DataParallelPPOActor(BasePPOActor):
                     mini_batch_start_idx += mb_len
                 micro_batch_start_idx = 0
 
-                for data in micro_batches:
+                # --- Padding Logic to prevent FSDP deadlock ---
+                # 1. Sync max number of micro_batches
+                local_num_mb = torch.tensor(len(micro_batches), device=get_torch_device().current_device())
+                dist.all_reduce(local_num_mb, op=dist.ReduceOp.MAX)
+                max_num_mb = local_num_mb.item()
+                
+                # 2. Prepare dummy batch template (reuse the last one to ensure shapes are correct)
+                # Note: We assume micro_batches is not empty
+                last_mb = micro_batches[-1]
+
+                for i in range(max_num_mb):
+                    if i < len(micro_batches):
+                        data = micro_batches[i]
+                        is_dummy = False
+                    else:
+                        data = last_mb
+                        is_dummy = True
+
                     # Support all hardwares
                     if isinstance(data, DataProto):
                         data = {**data.batch.to(get_torch_device().current_device()), **data.non_tensor_batch}
@@ -581,20 +600,23 @@ class DataParallelPPOActor(BasePPOActor):
                         metrics["actor/kl_loss"] = kl_loss.detach().item()
                         metrics["actor/kl_coef"] = self.config.kl_loss_coef
 
-                    if self.config.use_dynamic_bsz:
+                    if is_dummy:
+                        loss = 0.0 * policy_loss # Keep graph for FSDP communication, but zero gradient
+                    elif self.config.use_dynamic_bsz:
                         # relative to the dynamic bsz
                         loss = policy_loss * (len(data) / self.config.ppo_mini_batch_size)
                     else:
                         loss = policy_loss / self.gradient_accumulation
                     loss.backward()
 
-                    data = {
-                        "actor/pg_loss": pg_loss.detach().item(),
-                        "actor/pg_clipfrac": pg_clipfrac.detach().item(),
-                        "actor/ppo_kl": ppo_kl.detach().item(),
-                        "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
-                    }
-                    append_to_dict(metrics, data)
+                    if not is_dummy:
+                        data = {
+                            "actor/pg_loss": pg_loss.detach().item(),
+                            "actor/pg_clipfrac": pg_clipfrac.detach().item(),
+                            "actor/ppo_kl": ppo_kl.detach().item(),
+                            "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+                        }
+                        append_to_dict(metrics, data)
 
                 grad_norm = self._optimizer_step()
                 data = {"actor/grad_norm": grad_norm.detach().item()}
