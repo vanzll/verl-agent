@@ -454,10 +454,24 @@ class DataParallelPPOActor(BasePPOActor):
             dataloader = split_micro_batches_by_trajectory(batch, self.config.ppo_mini_batch_size, traj_uid_key="traj_uid", traj_uids=traj_uid_all)
 
 
+        # Pad the dataloader to ensure all workers have the same number of mini-batches
+        local_num_minibatch = torch.tensor(len(dataloader), device=get_torch_device().current_device())
+        dist.all_reduce(local_num_minibatch, op=dist.ReduceOp.MAX)
+        max_num_minibatch = local_num_minibatch.item()
+        
+        # Prepare padding masks
+        is_valid_minibatch = [True] * len(dataloader)
+        if len(dataloader) > 0:
+            padding_batch = dataloader[-1]
+            num_padding = max_num_minibatch - len(dataloader)
+            for _ in range(num_padding):
+                dataloader.append(padding_batch)
+                is_valid_minibatch.append(False)
+        
         metrics = {}
         for epoch in range(self.config.ppo_epochs):
             mini_batch_start_idx = 0  # used when we need to slice traj_uid without DataProto
-            for batch_idx, data in enumerate(dataloader):
+            for batch_idx, (data, is_mb_valid) in enumerate(zip(dataloader, is_valid_minibatch)):
                 # split batch into micro_batches
                 mini_batch = data
                 traj_uid_for_minibatch = None # Initialize to avoid UnboundLocalError
@@ -488,10 +502,21 @@ class DataParallelPPOActor(BasePPOActor):
                 self.actor_optimizer.zero_grad()
 
                 # Prepare traj_uid slice for this mini-batch when not using DataProto chunking
-                if not has_multi_modal_inputs and traj_uid_all is not None:
+                # Only advance start_idx if this is a valid batch
+                if is_mb_valid and not has_multi_modal_inputs and traj_uid_all is not None:
                     mb_len = len(mini_batch)
                     traj_uid_for_minibatch = traj_uid_all[mini_batch_start_idx : mini_batch_start_idx + mb_len]
                     mini_batch_start_idx += mb_len
+                elif not is_mb_valid and not has_multi_modal_inputs and traj_uid_all is not None:
+                    # For dummy batches, we just reuse the last valid slice or a dummy slice
+                    # Since we are not updating gradients, correctness of traj_uid here matters less 
+                    # as long as code doesn't crash. 
+                    # Reuse the logic but don't advance index.
+                    mb_len = len(mini_batch)
+                    # Safe guard against index out of bound if using previous start_idx
+                    safe_start = min(mini_batch_start_idx, len(traj_uid_all) - mb_len)
+                    traj_uid_for_minibatch = traj_uid_all[safe_start : safe_start + mb_len]
+
                 micro_batch_start_idx = 0
 
                 # --- Padding Logic to prevent FSDP deadlock ---
@@ -507,7 +532,8 @@ class DataParallelPPOActor(BasePPOActor):
                 for i in range(max_num_mb):
                     if i < len(micro_batches):
                         data = micro_batches[i]
-                        is_dummy = False
+                        # It is dummy if the outer mini-batch is invalid
+                        is_dummy = not is_mb_valid
                     else:
                         data = last_mb
                         is_dummy = True
@@ -552,8 +578,11 @@ class DataParallelPPOActor(BasePPOActor):
                             traj_index = data["traj_uid"]
                         elif traj_uid_all is not None:
                             mb_len = len(data)
-                            traj_index = traj_uid_for_minibatch[micro_batch_start_idx : micro_batch_start_idx + mb_len]
-                            micro_batch_start_idx += mb_len
+                            if micro_batch_start_idx + mb_len > len(traj_uid_for_minibatch):
+                                traj_index = np.arange(mb_len)
+                            else:
+                                traj_index = traj_uid_for_minibatch[micro_batch_start_idx : micro_batch_start_idx + mb_len]
+                                micro_batch_start_idx += mb_len
                         else:
                             raise ValueError("GTPO requires `traj_uid` in non_tensor_batch. Not found.")
                         pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = compute_policy_loss_gtpo(
