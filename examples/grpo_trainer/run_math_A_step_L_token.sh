@@ -45,7 +45,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.experiment_name='grpo_qwen3_4b_A_step_L_token_8k_response_4bsz_1tp' \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
-    trainer.save_freq=500 \
+    trainer.save_freq=300 \
     trainer.test_freq=10 \
-    trainer.total_epochs=2 \
+    trainer.total_epochs=5 \
     trainer.val_before_train=True $@

@@ -111,7 +111,7 @@ def compute_gae_advantage_return(
 
 # NOTE(sgm): this implementation only consider outcome supervision, where the reward is a scalar.
 def compute_grpo_outcome_advantage(
-    token_level_rewards: torch.Tensor,
+    token_level_rewards: torch.Tensor, # the last token's reward is propagated by the trajectory reward
     response_mask: torch.Tensor,
     index: np.ndarray, # I guess this if group id (uid) for each sample
     traj_index: np.ndarray,
@@ -144,7 +144,9 @@ def compute_grpo_outcome_advantage(
     if compute_mean_std_cross_steps == False:
         print("Use Naive GRPO")
     scores = token_level_rewards.sum(dim=-1)
-
+    #print("---------------View Compute Advantage Result-----------------")
+    #print("scores before normalization", scores)
+    #print(f"scores valid min/max: {scores.min().item()}, {scores.max().item()}")
     id2score = defaultdict(list)
     id2mean = {}
     id2std = {}
@@ -163,16 +165,37 @@ def compute_grpo_outcome_advantage(
                 id2std[idx] = torch.tensor(1.0)
             elif len(id2score[idx]) > 1:
                 id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
-                id2std[idx] = torch.std(torch.tensor([id2score[idx]]))
+                #id2std[idx] = torch.std(torch.tensor([id2score[idx]]))
+                id2std[idx] = torch.std(torch.stack(id2score[idx]))   # Might be more stable
             else:
                 raise ValueError(f"no score in prompt index: {idx}")
+
         for i in range(bsz):
             if norm_adv_by_std_in_grpo:
+
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
+                if id2std[index[i]] <= 1e-4:
+                    scores[i] = scores[i]*0.0 # important fix!!!!
+                ## debug, I add
+                ## Technically, if std = 0, then each step/traj receive same reward, then score[i] should have same value with id2mean[index[i]]
+
             else:
                 scores[i] = scores[i] - id2mean[index[i]]
         scores = scores.unsqueeze(-1) * response_mask
-
+ 
+    #print("scores after normalization", scores)
+    #print(f"scores valid min/max: {(scores * response_mask).min().item()}, {(scores * response_mask).max().item()}")
+    #print(f"scores non-zero count: {(scores != 0).sum().item()}")
+    #print("id2mean", id2mean)
+    #print("id2std", id2std)
+    #print("id2score", id2score)
+    #print("index", index)
+    #print("traj_index", traj_index)
+    #print("response_mask", response_mask)
+    #print("epsilon", epsilon)
+    #print("norm_adv_by_std_in_grpo", norm_adv_by_std_in_grpo)
+    #print("compute_mean_std_cross_steps", compute_mean_std_cross_steps)
+    #print("---------------End View Compute Advantage Result-----------------")
     return scores, scores
 
 
@@ -846,9 +869,14 @@ def compute_policy_loss_gtpo(
     traj_loss_sum.scatter_add_(0, group_id, per_sample_loss_sum)
     traj_tok_cnt.scatter_add_(0, group_id, per_sample_tok_cnt)
 
-    traj_mean_loss = traj_loss_sum / torch.clamp(traj_tok_cnt, min=1)
-    pg_loss = traj_mean_loss.mean() if num_groups > 0 else torch.tensor(0.0, device=device, dtype=per_sample_loss_sum.dtype)
+    print(f"traj_loss_sum: {traj_loss_sum}")
+    print(f"traj_tok_cnt: {traj_tok_cnt}")
 
+    traj_mean_loss = traj_loss_sum / torch.clamp(traj_tok_cnt, min=1)
+    print(f"traj_mean_loss: {traj_mean_loss}")
+    pg_loss = traj_mean_loss.mean() if num_groups > 0 else torch.tensor(0.0, device=device, dtype=per_sample_loss_sum.dtype)
+    print(f"pg_loss: {pg_loss}")
+    print(f"advantages: {advantages}")
     # Token-level metrics for logging consistency
     pg_clipfrac = verl_F.masked_mean(torch.gt(pg_losses2, pg_losses1).float(), response_mask)
     pg_clipfrac_lower = torch.tensor(0.0, device=device, dtype=pg_loss.dtype)

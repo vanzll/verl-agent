@@ -1,6 +1,6 @@
 set -x
 ENGINE=${1:-vllm}
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0,1
 num_cpus_per_env_worker=0.1
 
 train_data_size=16
@@ -32,7 +32,6 @@ python3 -m verl.trainer.main_ppo \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
-    +actor_rollout_ref.actor.pure_on_policy=False \
     actor_rollout_ref.actor.policy_loss.loss_mode=$loss_mode \
     actor_rollout_ref.model.path=Qwen/Qwen2.5-1.5B-Instruct \
     actor_rollout_ref.actor.optim.lr=1e-6 \
@@ -69,8 +68,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='gtpo_qwen2.5_1.5b_A_traj_L_traj_final_no_on_policy' \
-    trainer.n_gpus_per_node=4 \
+    trainer.experiment_name='gtpo_qwen2.5_1.5b_A_traj_L_traj_bugfixed_no_norm_adv_on_policy' \
+    trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \

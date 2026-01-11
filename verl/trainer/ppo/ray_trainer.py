@@ -302,6 +302,7 @@ def compute_advantage(data: DataProto, adv_estimator,
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
             compute_mean_std_cross_steps=compute_mean_std_cross_steps,
         )
+        
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
     elif adv_estimator == AdvantageEstimator.NAIVE_GRPO: # dumped

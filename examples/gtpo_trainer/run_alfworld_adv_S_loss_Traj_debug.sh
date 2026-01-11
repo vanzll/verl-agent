@@ -1,6 +1,6 @@
 set -x
 ENGINE=${1:-vllm}
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0,1
 num_cpus_per_env_worker=0.1
 
 train_data_size=16
@@ -21,8 +21,7 @@ python3 -m examples.data_preprocess.prepare \
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    +algorithm.compute_mean_std_cross_steps=False \
-    algorithm.norm_adv_by_std_in_grpo=True \
+    +algorithm.compute_mean_std_cross_steps=True \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -32,7 +31,6 @@ python3 -m verl.trainer.main_ppo \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
-    +actor_rollout_ref.actor.pure_on_policy=False \
     actor_rollout_ref.actor.policy_loss.loss_mode=$loss_mode \
     actor_rollout_ref.model.path=Qwen/Qwen2.5-1.5B-Instruct \
     actor_rollout_ref.actor.optim.lr=1e-6 \
@@ -46,7 +44,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=32 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=$ENGINE \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
@@ -69,8 +67,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='gtpo_qwen2.5_1.5b_A_traj_L_traj_final_no_on_policy' \
-    trainer.n_gpus_per_node=4 \
+    trainer.experiment_name='gtpo_qwen2.5_1.5b_A_step_L_traj_bugfixed' \
+    trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \

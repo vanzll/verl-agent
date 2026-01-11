@@ -1,30 +1,28 @@
 set -x
 ENGINE=${1:-vllm}
-export VLLM_ATTENTION_BACKEND=XFORMERS
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 num_cpus_per_env_worker=0.1
 
 train_data_size=16
 val_data_size=128
 group_size=8
 loss_mode="gtpo"
-clip_low=0.0003
-clip_high=0.0004
 
 # The CPU resource allocated for each environment worker.
 num_cpus_per_env_worker=0.1
+
+balance_batch=False
 
 # We only use data preparation to indicate the modality and the data size.
 python3 -m examples.data_preprocess.prepare \
     --mode 'text' \
     --train_data_size $train_data_size \
     --val_data_size $val_data_size
-# actor_rollout_ref.actor.use_dynamic_bsz = False and data.shuffle = False
+
 python3 -m verl.trainer.main_ppo \
-    actor_rollout_ref.actor.use_dynamic_bsz=False \
-    data.shuffle=False \
     algorithm.adv_estimator=advanced_grpo \
     +algorithm.compute_mean_std_cross_steps=False \
+    algorithm.norm_adv_by_std_in_grpo=True \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -34,12 +32,13 @@ python3 -m verl.trainer.main_ppo \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
+    +actor_rollout_ref.actor.pure_on_policy=True \
     actor_rollout_ref.actor.policy_loss.loss_mode=$loss_mode \
     actor_rollout_ref.model.path=Qwen/Qwen2.5-1.5B-Instruct \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=32 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=64 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.01 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
@@ -59,8 +58,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
     actor_rollout_ref.actor.invalid_action_penalty_coef=0.1 \
-    actor_rollout_ref.actor.clip_ratio_low=$clip_low \
-    actor_rollout_ref.actor.clip_ratio_high=$clip_high \
     algorithm.use_kl_in_reward=False \
     env.env_name=alfworld/AlfredTWEnv \
     env.seed=0 \
@@ -68,11 +65,12 @@ python3 -m verl.trainer.main_ppo \
     env.rollout.n=$group_size \
     env.resources_per_worker.num_cpus=$num_cpus_per_env_worker \
     trainer.resume_mode='auto' \
+    trainer.balance_batch=$balance_batch \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='gtpo_qwen2.5_1.5b_A_token_L_traj_bugfixed' \
-    trainer.n_gpus_per_node=2 \
+    trainer.experiment_name='gtpo_qwen2.5_1.5b_A_Token_L_Traj_final' \
+    trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \
