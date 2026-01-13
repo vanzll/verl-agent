@@ -267,6 +267,9 @@ class TrajectoryCollector:
                     # success_rate
                     for key, value in success_rate.items():
                         data[key] = value
+                    
+                    # pass
+                    data['pass'] = success['success_rate'][bs]
 
                     effective_batch.append(data)
             
@@ -281,6 +284,7 @@ class TrajectoryCollector:
             gen_batch: DataProto, 
             actor_rollout_wg, 
             envs: EnvironmentManagerBase,
+            effective_rollout_n: int = None,
             ) -> DataProto:
         """
         Collects trajectories through parallel agent-environment agent_loop.
@@ -288,6 +292,8 @@ class TrajectoryCollector:
             gen_batch (DataProto): Initial batch with prompts to start the agent_loop
             actor_rollout_wg (WorkerGroup): Worker group containing the actor model for policy decisions
             envs (EnvironmentManagerBase): Environment manager containing parallel environment instances
+            effective_rollout_n (int): The effective rollout n (group size) for uid generation. 
+                                       If None, uses config.env.rollout.n.
         
         Returns:
             total_batch_list (List[Dict]): List of trajectory data for each environment
@@ -298,6 +304,9 @@ class TrajectoryCollector:
         """
 
         batch_size = len(gen_batch.batch)
+        
+        # Use effective_rollout_n if provided, otherwise fall back to config
+        rollout_n = effective_rollout_n if effective_rollout_n is not None else self.config.env.rollout.n
 
         # Initial observations from the environment
         obs, infos = envs.reset(kwargs=gen_batch.non_tensor_batch.pop('env_kwargs', None))
@@ -305,10 +314,10 @@ class TrajectoryCollector:
         lenght_obs = len(obs['text']) if obs['text'] is not None else len(obs['image'])
         assert len(gen_batch.batch) == lenght_obs, f"gen_batch size {len(gen_batch.batch)} does not match obs size {lenght_obs}"
         
-        if self.config.env.rollout.n > 0: # env grouping
+        if rollout_n > 0: # env grouping
             uid_batch = []
             for i in range(batch_size):
-                if i % self.config.env.rollout.n == 0:
+                if i % rollout_n == 0:
                     uid = str(uuid.uuid4())
                 uid_batch.append(uid)
             uid_batch = np.array(uid_batch, dtype=object)
@@ -412,6 +421,7 @@ class TrajectoryCollector:
             gen_batch: DataProto, 
             actor_rollout_wg, 
             envs: EnvironmentManagerBase,
+            effective_rollout_n: int = None,
             ) -> DataProto:
         """
         Conduct dynamic rollouts until a target batch size is met. 
@@ -422,6 +432,7 @@ class TrajectoryCollector:
             gen_batch (DataProto): Initial batch for rollout.
             actor_rollout_wg: Actor model workers for generating responses.
             envs (EnvironmentManagerBase): Environment manager instance.
+            effective_rollout_n (int): The effective rollout n (group size) for uid generation.
 
         Returns:
             total_batch_list (List[Dict]): Complete set of rollout steps.
@@ -449,6 +460,7 @@ class TrajectoryCollector:
                 gen_batch=gen_batch,
                 actor_rollout_wg=actor_rollout_wg,
                 envs=envs,
+                effective_rollout_n=effective_rollout_n,
             )
             batch_list, episode_rewards, episode_lengths, success, traj_uid, tool_callings = filter_group_data(batch_list=batch_list, 
                                                                                                 episode_rewards=episode_rewards, 
@@ -494,9 +506,19 @@ class TrajectoryCollector:
         Returns:
             DataProto: Final collected trajectory data with metadata.
         """
+        # Determine the effective rollout_n based on training/validation mode
         if is_train:
-            gen_batch = gen_batch.repeat(repeat_times=self.config.env.rollout.n, interleave=True)
-            
+            effective_rollout_n = self.config.env.rollout.n
+            gen_batch = gen_batch.repeat(repeat_times=effective_rollout_n, interleave=True)
+        else:
+            # For validation, use val_n for pass@k and avg@k computation
+            val_rollout_n = getattr(self.config.env.rollout, 'val_n', None)
+            if val_rollout_n is not None and val_rollout_n > 1:
+                effective_rollout_n = val_rollout_n
+                gen_batch = gen_batch.repeat(repeat_times=effective_rollout_n, interleave=True)
+            else:
+                effective_rollout_n = 1
+
         # Initial observations from the environment
         if self.config.algorithm.filter_groups.enable and is_train:
             # Dynamic Sampling (for DAPO and Dynamic GiGPO)
@@ -505,6 +527,7 @@ class TrajectoryCollector:
                 gen_batch=gen_batch,
                 actor_rollout_wg=actor_rollout_wg,
                 envs=envs,
+                effective_rollout_n=effective_rollout_n,
             )
         else:
             # Vanilla Sampling   
@@ -513,6 +536,7 @@ class TrajectoryCollector:
                 gen_batch=gen_batch,
                 actor_rollout_wg=actor_rollout_wg,
                 envs=envs,
+                effective_rollout_n=effective_rollout_n,
             )
         assert len(total_batch_list) == len(total_episode_rewards)
         assert len(total_batch_list) == len(total_episode_lengths)

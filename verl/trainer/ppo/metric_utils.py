@@ -76,7 +76,7 @@ def _compute_response_info(batch: DataProto) -> Dict[str, Any]:
     )
 
 
-def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str, Any]:
+def compute_data_metrics(batch: DataProto, use_critic: bool = True, group_n: int = 1) -> Dict[str, Any]:
     """
     Computes various metrics from a batch of data for PPO training.
 
@@ -87,6 +87,7 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
     Args:
         batch: A DataProto object containing batch data with token-level scores, rewards, advantages, etc.
         use_critic: Whether to include critic-specific metrics. Defaults to True.
+        group_n: Group size for pass@k and avg@k computation. Defaults to 1.
 
     Returns:
         A dictionary of metrics including:
@@ -98,6 +99,7 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
             - critic/vf_explained_var: Explained variance of the value function (if use_critic=True)
             - response_length/mean, max, min, clip_ratio: Statistics about response lengths
             - prompt_length/mean, max, min, clip_ratio: Statistics about prompt lengths
+            - episode/pass@k, avg@k: Pass@k and avg@k metrics (if pass data is available)
     """
     sequence_score = batch.batch["token_level_scores"].sum(-1)
     sequence_reward = batch.batch["token_level_rewards"].sum(-1)
@@ -118,6 +120,10 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
 
     valid_adv = torch.masked_select(advantages, response_mask)
     valid_returns = torch.masked_select(returns, response_mask)
+    
+    uids = batch.non_tensor_batch.get('uid', None)
+    task_pass = batch.non_tensor_batch.get('pass', None)
+    
     unique_traj_uid, unique_idx = np.unique(batch.non_tensor_batch['traj_uid'], return_index=True)
 
     if use_critic:
@@ -186,6 +192,19 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
         #     batch.non_tensor_batch["tool_callings"][unique_idx].min().item(),
         **({f"episode/{k}": v[0].item() for k, v in batch.non_tensor_batch.items() if "success_rate" in k}),
     }
+    
+    # Compute pass@k and avg@k if pass data is available
+    if uids is not None and task_pass is not None:
+        unique_uids = uids[unique_idx]
+        unique_task_pass = task_pass[unique_idx]
+        
+        passk_avgk_metrics = compute_pass_at_k_and_avg_at_k(
+            unique_uids=unique_uids,
+            unique_task_pass=unique_task_pass,
+            k=group_n
+        )
+        metrics.update({f'episode/{k}': v for k, v in passk_avgk_metrics.items()})
+    
     return metrics
 
 
@@ -444,3 +463,49 @@ def process_validation_metrics(data_sources: list[str], sample_inputs: list[str]
                 data_src2var2metric2val[data_source][var_name][metric_name] = np.mean(prompt_vals)
 
     return data_src2var2metric2val
+
+
+def compute_pass_at_k_and_avg_at_k(unique_uids, unique_task_pass, k):
+    """Compute pass@k and avg@k metrics for tasks repeated k times.
+    
+    Args:
+        unique_uids: Array of unique identifiers for each task instance
+        unique_task_pass: Array of binary pass/fail indicators (1 for pass, 0 for fail)
+        k: Number of attempts per unique task
+    
+    Returns:
+        dict: Dictionary containing pass@k and avg@k metrics
+    """
+    from collections import defaultdict
+    
+    # Group task passes and rewards by uid
+    uid_to_passes = defaultdict(list)
+    
+    for uid, task_pass in zip(unique_uids, unique_task_pass):
+        uid_to_passes[uid].append(task_pass)
+    
+    # Calculate pass@k: proportion of tasks with at least one success
+    pass_at_k_list = []
+    avg_at_k_list = []
+    
+    for uid in uid_to_passes.keys():
+        passes = uid_to_passes[uid]
+        
+        # pass@k: 1 if any attempt passed, 0 otherwise
+        pass_at_k = 1.0 if any(passes) else 0.0
+        pass_at_k_list.append(pass_at_k)
+        
+        # avg@k: average of passes (success rate) for this task
+        avg_at_k = np.mean(passes)
+        avg_at_k_list.append(avg_at_k)
+    
+    # Calculate overall metrics
+    overall_pass_at_k = np.mean(pass_at_k_list)
+    overall_avg_at_k = np.mean(avg_at_k_list)
+    
+    metrics = {
+        f'pass@{k}': overall_pass_at_k.item(),
+        f'avg@{k}': overall_avg_at_k.item(),
+    }
+    
+    return metrics
