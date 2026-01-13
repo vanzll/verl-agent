@@ -70,4 +70,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.save_freq=300 \
     trainer.test_freq=10 \
     trainer.total_epochs=5 \
-    trainer.val_before_train=True
+    trainer.val_before_train=True \
+    trainer.val_only=$VAL_ONLY
