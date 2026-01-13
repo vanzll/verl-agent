@@ -6,7 +6,7 @@ if [ "$MODE" == "eval" ] || [ "$MODE" == "evaluation" ]; then
     echo "Running in evaluation mode"
     VAL_ONLY=True
     TRAIN_DATA="$HOME/data/verl_agent_math/train.parquet"
-    VAL_DATA="$HOME/data/verl_agent_math/test_sampled.parquet" # Full test dataset
+    VAL_DATA="$HOME/data/verl_agent_math/test.parquet" # Full test dataset
     train_data_size=32
     val_data_size=64
     val_group_size=16  # For pass@16 and avg@16 computation during evaluation

@@ -410,7 +410,10 @@ bash examples/grpo_trainer/run_alfworld.sh # ALFWorld
 bash examples/grpo_trainer/run_webshop.sh # WebShop
 ```
 ```bash
-bash examples/grpo_trainer/run_math.sh # WebShop
+bash examples/grpo_trainer/run_math_A_step_L_token.sh # Math Train
+```
+```bash
+bash examples/grpo_trainer/run_math_A_step_L_token.sh eval # Math Eval
 ```
 ### 3. PPO
 PPO is a classic actor-critic algorithm that updates the policy using a clipped objective to ensure stable learning. It requires a separate value network (critic) to estimate state values.
