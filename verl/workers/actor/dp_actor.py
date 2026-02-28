@@ -505,6 +505,12 @@ class DataParallelPPOActor(BasePPOActor):
                 if loss_mode == "gtpo" or self.config.use_dynamic_bsz:
                     self.gradient_accumulation = n_micro_batches_in_minibatch
 
+                # Pre-count total unique trajectories in this mini-batch for GTPO
+                # so each micro-batch's loss can be weighted by (n_trajs_in_mb / total_trajs)
+                total_trajs_in_minibatch = None
+                if loss_mode == "gtpo" and traj_uid_for_minibatch is not None:
+                    total_trajs_in_minibatch = len(np.unique(traj_uid_for_minibatch))
+
                 self.actor_optimizer.zero_grad()
 
                 micro_batch_start_idx = 0
@@ -575,7 +581,7 @@ class DataParallelPPOActor(BasePPOActor):
                             micro_batch_start_idx += mb_len
                         else:
                             raise ValueError("GTPO requires `traj_uid` in non_tensor_batch.")
-                        pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = compute_policy_loss_gtpo(
+                        pg_loss_sum, pg_clipfrac, ppo_kl, pg_clipfrac_lower, n_trajs_in_mb = compute_policy_loss_gtpo(
                             old_log_prob=old_log_prob,
                             log_prob=log_prob,
                             advantages=advantages,
@@ -586,6 +592,13 @@ class DataParallelPPOActor(BasePPOActor):
                             cliprange_high=clip_ratio_high,
                             clip_ratio_c=clip_ratio_c,
                         )
+                        # pg_loss_sum is the SUM of per-traj mean losses (not averaged).
+                        # We divide by total_trajs_in_minibatch so each traj gets equal weight
+                        # regardless of how micro-batches are split.
+                        if total_trajs_in_minibatch is not None and total_trajs_in_minibatch > 0:
+                            pg_loss = pg_loss_sum / total_trajs_in_minibatch
+                        else:
+                            pg_loss = pg_loss_sum / max(n_trajs_in_mb, 1)
                     else:
                         raise ValueError(f"Unsupported loss_mode: {loss_mode}")
                     if loss_mode in ("vanilla", "gspo"):
@@ -621,6 +634,11 @@ class DataParallelPPOActor(BasePPOActor):
 
                     if is_dummy:
                         loss = 0.0 * policy_loss # Keep graph for FSDP communication, but zero gradient
+                    elif loss_mode == "gtpo":
+                        # For GTPO, pg_loss is already weighted by (n_trajs_in_mb / total_trajs).
+                        # No additional division needed — gradient accumulation via .backward()
+                        # naturally sums gradients, and the per-traj weighting ensures correctness.
+                        loss = policy_loss
                     elif self.config.use_dynamic_bsz:
                         # relative to the dynamic bsz
                         loss = policy_loss * (len(data) / self.config.ppo_mini_batch_size)

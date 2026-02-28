@@ -869,20 +869,18 @@ def compute_policy_loss_gtpo(
     traj_loss_sum.scatter_add_(0, group_id, per_sample_loss_sum)
     traj_tok_cnt.scatter_add_(0, group_id, per_sample_tok_cnt)
 
-    print(f"traj_loss_sum: {traj_loss_sum}")
-    print(f"traj_tok_cnt: {traj_tok_cnt}")
-
     traj_mean_loss = traj_loss_sum / torch.clamp(traj_tok_cnt, min=1)
-    print(f"traj_mean_loss: {traj_mean_loss}")
-    pg_loss = traj_mean_loss.mean() if num_groups > 0 else torch.tensor(0.0, device=device, dtype=per_sample_loss_sum.dtype)
-    print(f"pg_loss: {pg_loss}")
-    print(f"advantages: {advantages}")
+    # Return sum of per-traj mean losses (NOT averaged over trajs here).
+    # The caller is responsible for weighting by num_groups to ensure
+    # equal per-trajectory weight across micro-batches during gradient accumulation.
+    pg_loss_sum = traj_mean_loss.sum() if num_groups > 0 else torch.tensor(0.0, device=device, dtype=per_sample_loss_sum.dtype)
+
     # Token-level metrics for logging consistency
     pg_clipfrac = verl_F.masked_mean(torch.gt(pg_losses2, pg_losses1).float(), response_mask)
-    pg_clipfrac_lower = torch.tensor(0.0, device=device, dtype=pg_loss.dtype)
+    pg_clipfrac_lower = torch.tensor(0.0, device=device, dtype=pg_loss_sum.dtype)
     ppo_kl = verl_F.masked_mean(-negative_approx_kl, response_mask)
 
-    return pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower
+    return pg_loss_sum, pg_clipfrac, ppo_kl, pg_clipfrac_lower, num_groups
 
 
 def compute_policy_loss_gspo(
