@@ -445,6 +445,12 @@ class DataParallelPPOActor(BasePPOActor):
         traj_uid_all = data.non_tensor_batch.get("traj_uid", None)
         loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
 
+        if loss_mode == "gtpo":
+            assert self.config.pure_on_policy, (
+                "GTPO requires pure_on_policy=True to guarantee trajectory integrity "
+                "within mini-batches and avoid FSDP deadlock."
+            )
+
         if loss_mode == "gtpo" and self.config.pure_on_policy:
             batch_length = len(batch)
             self.config.ppo_mini_batch_size = batch_length # pure on-policy
@@ -466,6 +472,12 @@ class DataParallelPPOActor(BasePPOActor):
                 # split batch into micro_batches
                 mini_batch = data
                 traj_uid_for_minibatch = None # Initialize to avoid UnboundLocalError
+                # Prepare traj_uid slice for this mini-batch when not using DataProto chunking
+                if not has_multi_modal_inputs and traj_uid_all is not None:
+                    mb_len = len(mini_batch)
+                    traj_uid_for_minibatch = traj_uid_all[mini_batch_start_idx : mini_batch_start_idx + mb_len]
+                    mini_batch_start_idx += mb_len
+
                 if has_multi_modal_inputs:
                     self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
                     num_micro_batches = mini_batch.batch.batch_size[0] // self.config.ppo_micro_batch_size_per_gpu
@@ -478,29 +490,22 @@ class DataParallelPPOActor(BasePPOActor):
                     # split batch into micro_batches
 
                     if loss_mode == "gtpo":
-                         # Special splitting for GTPO to keep trajectories intact
+                        # Special splitting for GTPO to keep trajectories intact
                         micro_batches = split_micro_batches_by_trajectory(
-                             mini_batch, 
-                             self.config.ppo_micro_batch_size_per_gpu,
-                             traj_uid_key="traj_uid",
-                             traj_uids=traj_uid_for_minibatch if not has_multi_modal_inputs and traj_uid_all is not None else None
-                         ) ## Invalid! have "none" argument, equivalent of traditional micro-batch approach
-
-                        # one microbatch may contains multiple intact traj, and the length may exceed the microbatch size, may OOM
-                        #micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
-
-                        n_micro_batches_in_minibatch = len(micro_batches)
-                        self.gradient_accumulation = n_micro_batches_in_minibatch ## important fix, increase the gradient scale
+                            mini_batch,
+                            self.config.ppo_micro_batch_size_per_gpu,
+                            traj_uid_key="traj_uid",
+                            traj_uids=traj_uid_for_minibatch if not has_multi_modal_inputs and traj_uid_all is not None else None
+                        )
                     else:
                         micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
-                self.actor_optimizer.zero_grad()
+                # Unified: set gradient accumulation from actual micro-batch count
+                n_micro_batches_in_minibatch = len(micro_batches)
+                if loss_mode == "gtpo" or self.config.use_dynamic_bsz:
+                    self.gradient_accumulation = n_micro_batches_in_minibatch
 
-                # Prepare traj_uid slice for this mini-batch when not using DataProto chunking
-                if not has_multi_modal_inputs and traj_uid_all is not None:
-                    mb_len = len(mini_batch)
-                    traj_uid_for_minibatch = traj_uid_all[mini_batch_start_idx : mini_batch_start_idx + mb_len]
-                    mini_batch_start_idx += mb_len
+                self.actor_optimizer.zero_grad()
 
                 micro_batch_start_idx = 0
 
@@ -559,17 +564,17 @@ class DataParallelPPOActor(BasePPOActor):
                         policy_loss_fn = compute_policy_loss_gspo
                     elif loss_mode == "gtpo":
                         # Build traj_index (length == current micro-batch size)
-                        if "traj_uid" in data:
+                        if is_dummy:
+                            # Dummy batch: use placeholder, loss will be zeroed anyway
+                            traj_index = np.zeros(responses.shape[0], dtype=int)
+                        elif "traj_uid" in data:
                             traj_index = data["traj_uid"]
-                        elif traj_uid_all is not None:
-                            mb_len = len(data)
-                            if micro_batch_start_idx + mb_len > len(traj_uid_for_minibatch):
-                                traj_index = np.arange(mb_len)
-                            else:
-                                traj_index = traj_uid_for_minibatch[micro_batch_start_idx : micro_batch_start_idx + mb_len]
-                                micro_batch_start_idx += mb_len
+                        elif traj_uid_for_minibatch is not None:
+                            mb_len = responses.shape[0]
+                            traj_index = traj_uid_for_minibatch[micro_batch_start_idx : micro_batch_start_idx + mb_len]
+                            micro_batch_start_idx += mb_len
                         else:
-                            raise ValueError("GTPO requires `traj_uid` in non_tensor_batch. Not found.")
+                            raise ValueError("GTPO requires `traj_uid` in non_tensor_batch.")
                         pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = compute_policy_loss_gtpo(
                             old_log_prob=old_log_prob,
                             log_prob=log_prob,
@@ -624,24 +629,24 @@ class DataParallelPPOActor(BasePPOActor):
                     loss.backward()
                     
                     if loss_mode == "gtpo":
-                        data={"actor/n_micro_batches_on_policy_update": n_micro_batches_in_minibatch,
-                              "actor/gradient_accumulation": self.gradient_accumulation}
+                        metrics_data = {"actor/n_micro_batches_on_policy_update": n_micro_batches_in_minibatch,
+                                        "actor/gradient_accumulation": self.gradient_accumulation}
                     else:
-                        data = {"actor/gradient_accumulation": self.gradient_accumulation}
-                    append_to_dict(metrics, data)
+                        metrics_data = {"actor/gradient_accumulation": self.gradient_accumulation}
+                    append_to_dict(metrics, metrics_data)
 
                     if not is_dummy:
-                        data = {
-                            "actor/training_loss": loss.detach().item(),#I add
+                        metrics_data = {
+                            "actor/training_loss": loss.detach().item(),
                             "actor/pg_loss": pg_loss.detach().item(),
                             "actor/pg_clipfrac": pg_clipfrac.detach().item(),
                             "actor/ppo_kl": ppo_kl.detach().item(),
                             "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
                         }
-                        append_to_dict(metrics, data)
+                        append_to_dict(metrics, metrics_data)
 
                 grad_norm = self._optimizer_step()
-                data = {"actor/grad_norm": grad_norm.detach().item()}
-                append_to_dict(metrics, data)
+                metrics_data = {"actor/grad_norm": grad_norm.detach().item()}
+                append_to_dict(metrics, metrics_data)
         self.actor_optimizer.zero_grad()
         return metrics
