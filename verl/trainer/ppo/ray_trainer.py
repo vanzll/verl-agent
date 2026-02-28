@@ -97,6 +97,7 @@ class AdvantageEstimator(str, Enum):
     GRPO_PASSK = "grpo_passk"
     GiGPO = 'gigpo'
     ADVANCED_GiGPO = 'advanced_gigpo'
+    CUSTOM = 'custom'
 
 
 @dataclass
@@ -409,6 +410,25 @@ def compute_advantage(data: DataProto, adv_estimator,
         )
         data.batch['advantages'] = advantages
         data.batch['returns'] = returns
+    elif adv_estimator == AdvantageEstimator.CUSTOM:
+        # Use user-provided Solution for custom advantage computation
+        from solution_loader import get_solution
+        solution = get_solution()
+        if solution is None:
+            raise RuntimeError("Custom advantage estimator requires a loaded Solution. "
+                             "Set SOLUTION_PATH env var and load via solution_loader.")
+        import numpy as np
+        advantages, returns = solution.compute_advantage(
+            token_level_rewards=data.batch["token_level_rewards"],
+            response_mask=data.batch["response_mask"],
+            episode_index=data.non_tensor_batch["uid"],
+            trajectory_index=data.non_tensor_batch["traj_uid"],
+            step_rewards=data.batch.get("step_rewards", None),
+            anchor_observations=data.non_tensor_batch.get("anchor_obs", None),
+            gamma=gamma,
+        )
+        data.batch["advantages"] = advantages
+        data.batch["returns"] = returns
     else:
         raise NotImplementedError
     return data
@@ -507,6 +527,7 @@ class RayPPOTrainer:
             AdvantageEstimator.REINFORCE_PLUS_PLUS_BASELINE,
             AdvantageEstimator.GiGPO,
             AdvantageEstimator.ADVANCED_GiGPO,
+            AdvantageEstimator.CUSTOM,
         ]:
             self.use_critic = False
         else:

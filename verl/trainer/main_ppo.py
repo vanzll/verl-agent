@@ -178,9 +178,17 @@ class TaskRunner:
             envs=envs,
             val_envs=val_envs,
         )
+        # Load custom solution if using custom advantage estimator
+        if config.algorithm.adv_estimator == "custom":
+            solution_path = config.algorithm.get("custom", {}).get("solution_path", os.environ.get("SOLUTION_PATH", ""))
+            if solution_path:
+                from solution_loader import load_solution
+                load_solution(solution_path)
+                print(f"[main_ppo] Loaded custom Solution from {solution_path}")
+            else:
+                print("[main_ppo] WARNING: custom adv_estimator but no solution_path provided")
+
         trainer.init_workers()
-        breakpoint()
-        #pdb.set_trace()
         trainer.fit()
 
 def create_rl_dataset(data_paths, data_config, tokenizer, processor):

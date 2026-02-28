@@ -7,6 +7,7 @@ train_data_size=16
 val_data_size=128
 group_size=8
 loss_mode="gtpo"
+mode="mean_std_norm" # "mean_norm" or "mean_std_norm"
 
 # The CPU resource allocated for each environment worker.
 num_cpus_per_env_worker=0.1
@@ -20,9 +21,7 @@ python3 -m examples.data_preprocess.prepare \
     --val_data_size $val_data_size
 
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=advanced_grpo \
-    +algorithm.compute_mean_std_cross_steps=False \
-    algorithm.norm_adv_by_std_in_grpo=True \
+    algorithm.adv_estimator=gigpo \
     data.train_files=$HOME/data/verl-agent/text/train.parquet \
     data.val_files=$HOME/data/verl-agent/text/test.parquet \
     data.train_batch_size=$train_data_size \
@@ -59,6 +58,9 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
     actor_rollout_ref.actor.invalid_action_penalty_coef=0.1 \
     algorithm.use_kl_in_reward=False \
+    algorithm.gamma=0.95 \
+    algorithm.gigpo.step_advantage_w=1.0 \
+    algorithm.gigpo.mode=$mode \
     env.env_name=alfworld/AlfredTWEnv \
     env.seed=0 \
     env.max_steps=50 \
@@ -69,7 +71,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld' \
-    trainer.experiment_name='gtpo_qwen2.5_1.5b_A_Token_L_Traj_2.28' \
+    trainer.experiment_name='qwen2.5_1.5b_A_gigpo_L_traj_2.28' \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
