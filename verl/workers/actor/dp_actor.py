@@ -453,8 +453,13 @@ class DataParallelPPOActor(BasePPOActor):
 
         if loss_mode == "gtpo" and self.config.pure_on_policy:
             batch_length = len(batch)
+            # pure_on_policy collapses all mini-batches into 1, reducing optimizer steps.
+            # Auto-compensate: set ppo_epochs = original number of mini-batches,
+            # so the total optimizer steps match non-pure-on-policy training.
+            original_mini_batch_size = self.config.ppo_mini_batch_size
+            num_original_minibatches = max(batch_length // original_mini_batch_size, 1)
             self.config.ppo_mini_batch_size = batch_length # pure on-policy
-    
+
         if has_multi_modal_inputs:
             num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
             non_tensor_select_keys = ["multi_modal_inputs"]
@@ -465,8 +470,19 @@ class DataParallelPPOActor(BasePPOActor):
             dataloader = batch.split(self.config.ppo_mini_batch_size)
             #dataloader = split_micro_batches_by_trajectory(batch, self.config.ppo_mini_batch_size, traj_uid_key="traj_uid", traj_uids=traj_uid_all)
 
+        # For GTPO with pure_on_policy, dynamically set epochs to match the
+        # number of optimizer steps that non-pure-on-policy training would have.
+        # Users can still override via config: ppo_epochs > 1 takes precedence.
+        if loss_mode == "gtpo" and self.config.pure_on_policy:
+            if self.config.ppo_epochs == 1:
+                n_epochs = num_original_minibatches
+            else:
+                n_epochs = self.config.ppo_epochs  # user override
+        else:
+            n_epochs = self.config.ppo_epochs
+
         metrics = {}
-        for epoch in range(self.config.ppo_epochs):
+        for epoch in range(n_epochs):
             mini_batch_start_idx = 0  # used when we need to slice traj_uid without DataProto
             for batch_idx, data in enumerate(dataloader):
                 # split batch into micro_batches
