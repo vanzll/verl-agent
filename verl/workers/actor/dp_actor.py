@@ -182,6 +182,9 @@ class DataParallelPPOActor(BasePPOActor):
             else verl_F.entropy_from_logits
         )
         self.device_name = get_device_name()
+        # Save original ppo_mini_batch_size before pure_on_policy overwrites it.
+        # Used to compute auto-compensated ppo_epochs across all training iterations.
+        self._original_ppo_mini_batch_size = self.config.ppo_mini_batch_size
 
     def _forward_micro_batch(self, micro_batch, temperature, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -456,8 +459,9 @@ class DataParallelPPOActor(BasePPOActor):
             # pure_on_policy collapses all mini-batches into 1, reducing optimizer steps.
             # Auto-compensate: set ppo_epochs = original number of mini-batches,
             # so the total optimizer steps match non-pure-on-policy training.
-            original_mini_batch_size = self.config.ppo_mini_batch_size
-            num_original_minibatches = max(batch_length // original_mini_batch_size, 1)
+            # Use _original_ppo_mini_batch_size (saved in __init__) because
+            # self.config.ppo_mini_batch_size gets overwritten to batch_length below.
+            num_original_minibatches = max(batch_length // self._original_ppo_mini_batch_size, 1)
             self.config.ppo_mini_batch_size = batch_length # pure on-policy
 
         if has_multi_modal_inputs:
