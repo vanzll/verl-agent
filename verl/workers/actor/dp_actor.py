@@ -453,6 +453,18 @@ class DataParallelPPOActor(BasePPOActor):
 
         if loss_mode == "gtpo" and self.config.pure_on_policy:
             batch_length = len(batch)
+            # Compute how many mini-batches the original config would have produced.
+            # pure_on_policy collapses them all into 1, so we compensate with ppo_epochs
+            # to maintain a comparable number of optimizer steps per training iteration.
+            original_mini_batch_size = self.config.ppo_mini_batch_size
+            num_original_minibatches = max(batch_length // original_mini_batch_size, 1)
+            if num_original_minibatches > 1 and self.config.ppo_epochs == 1:
+                logger.warning(
+                    f"GTPO pure_on_policy: batch_per_gpu={batch_length}, "
+                    f"original ppo_mini_batch_size={original_mini_batch_size} would give "
+                    f"{num_original_minibatches} mini-batches, but pure_on_policy collapses to 1. "
+                    f"Consider setting ppo_epochs >= {num_original_minibatches} to compensate."
+                )
             self.config.ppo_mini_batch_size = batch_length # pure on-policy
     
         if has_multi_modal_inputs:
