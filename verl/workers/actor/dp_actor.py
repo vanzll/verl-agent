@@ -486,6 +486,22 @@ class DataParallelPPOActor(BasePPOActor):
             n_epochs = self.config.ppo_epochs
 
         metrics = {}
+
+        # Debug metrics for GTPO auto-compensation diagnosis
+        if loss_mode == "gtpo" and self.config.pure_on_policy:
+            logger.warning(
+                f"[GTPO auto-compensation] batch_length={batch_length}, "
+                f"_original_ppo_mini_batch_size={self._original_ppo_mini_batch_size}, "
+                f"num_original_minibatches={num_original_minibatches}, "
+                f"config.ppo_epochs={self.config.ppo_epochs}, "
+                f"n_epochs={n_epochs}, "
+                f"config.ppo_mini_batch_size(after overwrite)={self.config.ppo_mini_batch_size}"
+            )
+            metrics["actor/gtpo_n_epochs"] = [n_epochs]
+            metrics["actor/gtpo_batch_length"] = [batch_length]
+            metrics["actor/gtpo_original_mini_batch_size"] = [self._original_ppo_mini_batch_size]
+            metrics["actor/gtpo_num_original_minibatches"] = [num_original_minibatches]
+
         for epoch in range(n_epochs):
             mini_batch_start_idx = 0  # used when we need to slice traj_uid without DataProto
             for batch_idx, data in enumerate(dataloader):
@@ -680,11 +696,21 @@ class DataParallelPPOActor(BasePPOActor):
                             "actor/pg_clipfrac": pg_clipfrac.detach().item(),
                             "actor/ppo_kl": ppo_kl.detach().item(),
                             "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+                            "actor/epoch_idx": epoch,
                         }
                         append_to_dict(metrics, metrics_data)
 
                 grad_norm = self._optimizer_step()
                 metrics_data = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, metrics_data)
+
+                # Per-epoch debug metrics: track how ppo_kl evolves across epochs
+                if loss_mode == "gtpo":
+                    append_to_dict(metrics, {
+                        f"actor/ppo_kl_epoch{epoch}": ppo_kl.detach().item() if not is_dummy else 0.0,
+                        f"actor/pg_clipfrac_epoch{epoch}": pg_clipfrac.detach().item() if not is_dummy else 0.0,
+                        f"actor/grad_norm_epoch{epoch}": grad_norm.detach().item(),
+                    })
+
         self.actor_optimizer.zero_grad()
         return metrics
