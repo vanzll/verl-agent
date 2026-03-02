@@ -184,7 +184,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.device_name = get_device_name()
         # Save original ppo_mini_batch_size before pure_on_policy overwrites it.
         # Used to compute auto-compensated ppo_epochs across all training iterations.
-        self._original_ppo_mini_batch_size = self.config.ppo_mini_batch_size
+        # Note: ref policy also uses this class but lacks ppo_mini_batch_size in config.
+        self._original_ppo_mini_batch_size = self.config.get("ppo_mini_batch_size", None)
 
     def _forward_micro_batch(self, micro_batch, temperature, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor]:
         """
