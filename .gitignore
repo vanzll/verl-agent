@@ -135,3 +135,14 @@ data/
 # worktrees
 .worktrees/
 
+# Claude Code
+.claude/
+
+# Local scratch files
+cuda_test.py
+ADVANCED_GRPO_IMPLEMENTATION.md
+NAIVE_GRPO_IMPLEMENTATION.md
+GRPO_IMPLEMENTATION_SUMMARY.md
+GRPO_VARIANTS_COMPARISON.md
+GRPO_VARIANTS_FIXES.md
+
