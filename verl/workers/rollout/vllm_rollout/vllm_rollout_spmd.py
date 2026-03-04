@@ -89,27 +89,14 @@ class vLLMRollout(BaseRollout):
         self.config = config
         assert not (not config.enforce_eager and config.free_cache_engine), "disable CUDA graph (enforce_eager = False) if free cache engine"
 
-        # Temporarily remove expandable_segments from PYTORCH_CUDA_ALLOC_CONF
-        # before initializing vllm, as it conflicts with vllm's memory pool.
-        # The setting is restored after LLM initialization so FSDP training
-        # can still benefit from it.
-        cuda_alloc_conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
-        if "expandable_segments:True" in cuda_alloc_conf:
-            self._had_expandable_segments = True
-            parts = [p.strip() for p in cuda_alloc_conf.split(",") if "expandable_segments" not in p]
-            if parts:
-                os.environ["PYTORCH_CUDA_ALLOC_CONF"] = ",".join(parts)
-            else:
-                os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
-        else:
-            self._had_expandable_segments = False
-
         tensor_parallel_size = self.config.get("tensor_model_parallel_size", 1)
         assert tensor_parallel_size <= torch.distributed.get_world_size(), "tensor parallel size should be less than or equal to the world size"
         max_num_batched_tokens = self.config.get("max_num_batched_tokens", 8192)
 
         if kwargs.get("train_tp") is not None:
             # deployed with megatron
+            import os
+
             os.environ["CUDA_TIMER_STREAM_KAFKA_ENABLE"] = "0"
             os.environ["MEGATRON_IMPORT_TIMERS"] = "0"
             if vllm_version in (
@@ -183,14 +170,6 @@ class vLLMRollout(BaseRollout):
             **lora_kwargs,
             **engine_kwargs,
         )
-
-        # Restore expandable_segments after vllm initialization
-        if self._had_expandable_segments:
-            existing = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
-            if existing:
-                os.environ["PYTORCH_CUDA_ALLOC_CONF"] = existing + ",expandable_segments:True"
-            else:
-                os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
         # Offload vllm model to reduce peak memory usage
         self.inference_engine.sleep(level=1)
