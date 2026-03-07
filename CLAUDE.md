@@ -75,6 +75,7 @@ ALFWorld, WebShop, Search (Search-R1), Sokoban, Gym Cards (EZPoints, Points24, N
 - **Config**: Hydra + OmegaConf variable interpolation (e.g., `${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}`)
 - **Distributed**: Supports both FSDP/FSDP2 and Megatron distributed strategies, orchestrated via Ray
 - **LoRA**: Supported for parameter-efficient fine-tuning
+- **GTPO micro-batch & GPU memory**: In GTPO (`loss_mode=gtpo`), `split_micro_batches_by_trajectory` keeps entire trajectories intact within a single micro-batch. This means the **effective micro-batch size is bounded by the longest trajectory** (up to `env.max_steps`), regardless of `ppo_micro_batch_size_per_gpu`. Adding more GPUs does NOT reduce per-GPU micro-batch size because one full trajectory must fit on one GPU. The dominant GPU memory consumer is the logits tensor `(total_nnz × vocab_size)` — for Qwen2.5 (vocab=151,936) this can be 15–20 GiB per micro-batch, multiplied by 2–3× during forward (entropy computation disables `inplace_backward`, keeping multiple copies alive simultaneously).
 
 ## Dependencies
 
