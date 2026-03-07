@@ -542,6 +542,15 @@ class DataParallelPPOActor(BasePPOActor):
                 if loss_mode == "gtpo" or self.config.use_dynamic_bsz:
                     self.gradient_accumulation = n_micro_batches_in_minibatch
 
+                # Monitor real micro-batch sizes (critical for GTPO GPU memory)
+                if loss_mode == "gtpo":
+                    max_mb_samples = max(mb.batch.batch_size[0] if isinstance(mb, DataProto) else mb.batch_size[0] for mb in micro_batches)
+                    max_mb_nnz = max(int(mb.batch["attention_mask"].sum().item()) if isinstance(mb, DataProto) else int(mb["attention_mask"].sum().item()) for mb in micro_batches)
+                    append_to_dict(metrics, {
+                        "actor/gtpo_max_micro_batch_samples": max_mb_samples,
+                        "actor/gtpo_max_micro_batch_nnz_tokens": max_mb_nnz,
+                    })
+
                 # Pre-count total unique trajectories in this mini-batch for GTPO
                 # so each micro-batch's loss can be weighted by (n_trajs_in_mb / total_trajs)
                 total_trajs_in_minibatch = None
