@@ -546,6 +546,7 @@ class DataParallelPPOActor(BasePPOActor):
                 if loss_mode == "gtpo":
                     max_mb_samples = max(mb.batch.batch_size[0] if isinstance(mb, DataProto) else mb.batch_size[0] for mb in micro_batches)
                     max_mb_nnz = max(int(mb.batch["attention_mask"].sum().item()) if isinstance(mb, DataProto) else int(mb["attention_mask"].sum().item()) for mb in micro_batches)
+                    print(f"[GTPO micro-batch monitor] epoch={epoch}, n_micro_batches={n_micro_batches_in_minibatch}, max_micro_batch_samples={max_mb_samples}, max_micro_batch_nnz_tokens={max_mb_nnz}")
                     append_to_dict(metrics, {
                         "actor/gtpo_max_micro_batch_samples": max_mb_samples,
                         "actor/gtpo_max_micro_batch_nnz_tokens": max_mb_nnz,
