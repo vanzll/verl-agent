@@ -106,12 +106,25 @@ def split_micro_batches_by_trajectory(mini_batch, target_micro_batch_size, traj_
             
             if curr_uid == next_uid:
                 # We are in the middle of a trajectory.
-                # Look forward to include the rest of this trajectory
-                # Strategy: Look forward (greedy inclusion)
-                scan_idx = end_idx
-                while scan_idx < total_size and traj_uids[scan_idx] == curr_uid:
-                    scan_idx += 1
-                end_idx = scan_idx
+                # Strategy: Look backward — exclude the partial trajectory,
+                # pushing it to the next micro-batch. This keeps micro-batch
+                # size bounded by max_traj_length instead of
+                # target_micro_batch_size + max_traj_length.
+                scan_idx = end_idx - 1
+                while scan_idx > start_idx and traj_uids[scan_idx] == curr_uid:
+                    scan_idx -= 1
+                # scan_idx now points to the last sample of the previous trajectory
+                # (or start_idx if the entire micro-batch is one trajectory)
+                if scan_idx == start_idx and traj_uids[scan_idx] == curr_uid:
+                    # The whole range [start_idx, end_idx) is a single trajectory
+                    # that exceeds target size — must include it entirely.
+                    # Look forward to find the end of this trajectory.
+                    scan_idx = end_idx
+                    while scan_idx < total_size and traj_uids[scan_idx] == curr_uid:
+                        scan_idx += 1
+                    end_idx = scan_idx
+                else:
+                    end_idx = scan_idx + 1
                 
         # Slice the batch
         if is_dataproto:
