@@ -76,6 +76,7 @@ ALFWorld, WebShop, Search (Search-R1), Sokoban, Gym Cards (EZPoints, Points24, N
 - **Distributed**: Supports both FSDP/FSDP2 and Megatron distributed strategies, orchestrated via Ray
 - **LoRA**: Supported for parameter-efficient fine-tuning
 - **GTPO micro-batch & GPU memory**: In GTPO (`loss_mode=gtpo`), `split_micro_batches_by_trajectory` keeps entire trajectories intact within a single micro-batch. This means the **effective micro-batch size is bounded by the longest trajectory** (up to `env.max_steps`), regardless of `ppo_micro_batch_size_per_gpu`. Adding more GPUs does NOT reduce per-GPU micro-batch size because one full trajectory must fit on one GPU. The dominant GPU memory consumer is the logits tensor `(total_nnz × vocab_size)` — for Qwen2.5 (vocab=151,936) this can be 15–20 GiB per micro-batch, multiplied by 2–3× during forward (entropy computation disables `inplace_backward`, keeping multiple copies alive simultaneously).
+- **GTPO loss normalization**: GTPO's `pg_loss` is normalized via `total_trajs_in_minibatch` weighting (not `gradient_accumulation` division like vanilla/GSPO). Auxiliary losses (entropy, KL) are micro-batch-level means and must be explicitly divided by `gradient_accumulation` in the GTPO branch, otherwise they get inflated ~30× due to gradient accumulation summing.
 
 ## Dependencies
 

@@ -695,10 +695,13 @@ class DataParallelPPOActor(BasePPOActor):
                     if is_dummy:
                         loss = 0.0 * policy_loss # Keep graph for FSDP communication, but zero gradient
                     elif loss_mode == "gtpo":
-                        # For GTPO, pg_loss is already weighted by (n_trajs_in_mb / total_trajs).
-                        # No additional division needed — gradient accumulation via .backward()
-                        # naturally sums gradients, and the per-traj weighting ensures correctness.
-                        loss = policy_loss
+                        # pg_loss is already normalized via (n_trajs_in_mb / total_trajs) weighting,
+                        # so gradient accumulation across micro-batches yields the correct mean.
+                        # However, auxiliary losses (entropy, kl) are micro-batch-level means
+                        # that would be SUMMED by gradient accumulation, inflating them by
+                        # ~gradient_accumulation times. Divide them to get the correct mean.
+                        aux_loss = policy_loss - pg_loss  # entropy + kl components
+                        loss = pg_loss + aux_loss / self.gradient_accumulation
                     elif self.config.use_dynamic_bsz:
                         # relative to the dynamic bsz
                         loss = policy_loss * (len(data) / self.config.ppo_mini_batch_size)
