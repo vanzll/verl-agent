@@ -231,6 +231,8 @@ class Worker(Worker):
         # ensure `enforce_eager=True`
         self.cache_engine = None
         self.gpu_cache = None
+        gc.collect()
+        torch.cuda.empty_cache()
 
     # NOTE(sgm): [VERL]: adapt from _execute_model_spmd()
     def execute_model(self, execute_model_req: ExecuteModelRequest, intermediate_tensors: Optional[IntermediateTensors] = None) -> Optional[List[SamplerOutput]]:
