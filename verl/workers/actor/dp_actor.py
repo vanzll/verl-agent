@@ -195,10 +195,7 @@ class DataParallelPPOActor(BasePPOActor):
             else verl_F.entropy_from_logits
         )
         self.device_name = get_device_name()
-        # Save original ppo_mini_batch_size before pure_on_policy overwrites it.
-        # Used to compute auto-compensated ppo_epochs across all training iterations.
         # Note: ref policy also uses this class but lacks ppo_mini_batch_size in config.
-        self._original_ppo_mini_batch_size = self.config.get("ppo_mini_batch_size", None)
 
     def _forward_micro_batch(self, micro_batch, temperature, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -471,6 +468,10 @@ class DataParallelPPOActor(BasePPOActor):
         if loss_mode == "gtpo" and self.config.pure_on_policy:
             batch_length = len(batch)
 
+        # Initialize to None; only assigned in the GTPO+pure_on_policy branch below.
+        # This avoids a NameError if future refactors move the is_minibatch_dummy check.
+        real_minibatch_count = None
+
         if has_multi_modal_inputs:
             num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
             non_tensor_select_keys = ["multi_modal_inputs"]
@@ -507,7 +508,13 @@ class DataParallelPPOActor(BasePPOActor):
             # Compensation is now via multiple mini-batches per epoch, not multiple epochs.
             n_epochs = 1
             if self.config.ppo_epochs > 1:
-                n_epochs = self.config.ppo_epochs  # user override
+                # User override: running multiple epochs reuses old_log_probs from the
+                # initial rollout, making epochs 2+ off-policy. Use with caution.
+                logger.warning(
+                    f"[GTPO] ppo_epochs={self.config.ppo_epochs} > 1 with pure_on_policy=True. "
+                    "Epochs 2+ use stale reference log-probs and are off-policy."
+                )
+                n_epochs = self.config.ppo_epochs
         else:
             n_epochs = self.config.ppo_epochs
 
@@ -531,8 +538,7 @@ class DataParallelPPOActor(BasePPOActor):
             for batch_idx, data in enumerate(dataloader):
                 # Detect dummy mini-batches (FSDP padding for GTPO stochastic mini-batch)
                 is_minibatch_dummy = (
-                    loss_mode == "gtpo" and self.config.pure_on_policy
-                    and not has_multi_modal_inputs
+                    real_minibatch_count is not None
                     and batch_idx >= real_minibatch_count
                 )
 
@@ -575,14 +581,17 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
-                # Unified: set gradient accumulation from actual micro-batch count
+                # Unified: set gradient accumulation from actual micro-batch count.
+                # For GTPO+pure_on_policy: len(micro_batches)==1, so gradient_accumulation=1.
+                # The aux_loss / self.gradient_accumulation division is therefore a no-op (÷1),
+                # which is correct since there is no gradient accumulation to compensate for.
                 n_micro_batches_in_minibatch = len(micro_batches)
                 if loss_mode == "gtpo" or self.config.use_dynamic_bsz:
                     self.gradient_accumulation = n_micro_batches_in_minibatch
 
                 # Monitor real micro-batch sizes (critical for GTPO GPU memory)
                 if loss_mode == "gtpo":
-                    max_mb_samples = max(mb.batch.batch_size[0] if isinstance(mb, DataProto) else mb.batch_size[0] for mb in micro_batches)
+                    max_mb_samples = max(len(mb) for mb in micro_batches)
                     max_mb_nnz = max(int(mb.batch["attention_mask"].sum().item()) if isinstance(mb, DataProto) else int(mb["attention_mask"].sum().item()) for mb in micro_batches)
                     print(f"[GTPO micro-batch monitor] epoch={epoch}, n_micro_batches={n_micro_batches_in_minibatch}, max_micro_batch_samples={max_mb_samples}, max_micro_batch_nnz_tokens={max_mb_nnz}")
                     append_to_dict(metrics, {
