@@ -464,6 +464,10 @@ class DataParallelPPOActor(BasePPOActor):
                 "GTPO requires pure_on_policy=True to guarantee trajectory integrity "
                 "within mini-batches and avoid FSDP deadlock."
             )
+            assert not has_multi_modal_inputs, (
+                "GTPO with multimodal inputs is not supported. "
+                "The multimodal dataloader path bypasses traj_uid mini-batch slicing."
+            )
 
         if loss_mode == "gtpo" and self.config.pure_on_policy:
             batch_length = len(batch)
@@ -568,18 +572,7 @@ class DataParallelPPOActor(BasePPOActor):
                     micro_batches = [mini_batch]
                 else:
                     self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
-                    # split batch into micro_batches
-
-                    if loss_mode == "gtpo":
-                        # Special splitting for GTPO to keep trajectories intact
-                        micro_batches = split_micro_batches_by_trajectory(
-                            mini_batch,
-                            self.config.ppo_micro_batch_size_per_gpu,
-                            traj_uid_key="traj_uid",
-                            traj_uids=traj_uid_for_minibatch if not has_multi_modal_inputs and traj_uid_all is not None else None
-                        )
-                    else:
-                        micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
+                    micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
                 # Unified: set gradient accumulation from actual micro-batch count.
                 # For GTPO+pure_on_policy: len(micro_batches)==1, so gradient_accumulation=1.
@@ -610,10 +603,15 @@ class DataParallelPPOActor(BasePPOActor):
                 micro_batch_start_idx = 0
 
                 # --- Padding Logic to prevent FSDP deadlock ---
-                # 1. Sync max number of micro_batches
-                local_num_mb = torch.tensor(len(micro_batches), device=get_torch_device().current_device())
-                dist.all_reduce(local_num_mb, op=dist.ReduceOp.MAX)
-                max_num_mb = local_num_mb.item()
+                # 1. Sync max number of micro_batches across DP ranks.
+                # For GTPO+pure_on_policy each mini-batch is already 1 micro-batch
+                # (synced at the mini-batch level above), so skip the per-mini-batch sync.
+                if loss_mode == "gtpo" and self.config.pure_on_policy:
+                    max_num_mb = len(micro_batches)  # always 1
+                else:
+                    local_num_mb = torch.tensor(len(micro_batches), device=get_torch_device().current_device())
+                    dist.all_reduce(local_num_mb, op=dist.ReduceOp.MAX)
+                    max_num_mb = local_num_mb.item()
                 
                 # 2. Prepare dummy batch template (reuse the last one to ensure shapes are correct)
                 # Note: We assume micro_batches is not empty
@@ -657,7 +655,6 @@ class DataParallelPPOActor(BasePPOActor):
                         calculate_entropy = True
                     entropy, log_prob = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=calculate_entropy)
                     
-                    loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
                     if loss_mode == "vanilla":
                         policy_loss_fn = compute_policy_loss
                     elif loss_mode == "gspo":
