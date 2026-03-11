@@ -470,13 +470,6 @@ class DataParallelPPOActor(BasePPOActor):
 
         if loss_mode == "gtpo" and self.config.pure_on_policy:
             batch_length = len(batch)
-            # pure_on_policy collapses all mini-batches into 1, reducing optimizer steps.
-            # Auto-compensate: set ppo_epochs = original number of mini-batches,
-            # so the total optimizer steps match non-pure-on-policy training.
-            # Use _original_ppo_mini_batch_size (saved in __init__) because
-            # self.config.ppo_mini_batch_size gets overwritten to batch_length below.
-            num_original_minibatches = max(batch_length // self._original_ppo_mini_batch_size, 1)
-            self.config.ppo_mini_batch_size = batch_length # pure on-policy
 
         if has_multi_modal_inputs:
             num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
@@ -484,49 +477,77 @@ class DataParallelPPOActor(BasePPOActor):
             if traj_uid_all is not None:
                 non_tensor_select_keys.append("traj_uid")
             dataloader = data.select(select_keys, non_tensor_select_keys).chunk(num_mini_batches)
+        elif loss_mode == "gtpo" and self.config.pure_on_policy:
+            # Stochastic mini-batch approach: split the full batch into
+            # trajectory-aware mini-batches (each ~ppo_micro_batch_size_per_gpu).
+            # Each mini-batch triggers 1 optimizer.step(), providing natural
+            # regularization via stochastic noise (like baseline GRPO).
+            # This replaces the old "1 giant mini-batch x N epochs" approach
+            # which caused entropy collapse and KL explosion.
+            dataloader = split_micro_batches_by_trajectory(
+                batch,
+                self.config.ppo_micro_batch_size_per_gpu,
+                traj_uid_key="traj_uid",
+                traj_uids=traj_uid_all,
+            )
+            # Sync mini-batch count across DP ranks to prevent FSDP deadlock
+            real_minibatch_count = len(dataloader)
+            local_count = torch.tensor(real_minibatch_count, device=get_torch_device().current_device())
+            dist.all_reduce(local_count, op=dist.ReduceOp.MAX)
+            max_minibatch_count = int(local_count.item())
+            # Pad with dummy mini-batches if this rank has fewer
+            last_mb_template = dataloader[-1]
+            while len(dataloader) < max_minibatch_count:
+                dataloader.append(last_mb_template)
         else:
             dataloader = batch.split(self.config.ppo_mini_batch_size)
-            #dataloader = split_micro_batches_by_trajectory(batch, self.config.ppo_mini_batch_size, traj_uid_key="traj_uid", traj_uids=traj_uid_all)
 
-        # For GTPO with pure_on_policy, dynamically set epochs to match the
-        # number of optimizer steps that non-pure-on-policy training would have.
-        # Users can still override via config: ppo_epochs > 1 takes precedence.
+        # Set number of epochs
         if loss_mode == "gtpo" and self.config.pure_on_policy:
-            if self.config.ppo_epochs == 1:
-                n_epochs = num_original_minibatches
-            else:
+            # Compensation is now via multiple mini-batches per epoch, not multiple epochs.
+            n_epochs = 1
+            if self.config.ppo_epochs > 1:
                 n_epochs = self.config.ppo_epochs  # user override
         else:
             n_epochs = self.config.ppo_epochs
 
         metrics = {}
 
-        # Debug metrics for GTPO auto-compensation diagnosis
+        # Debug metrics for GTPO stochastic mini-batch diagnosis
         if loss_mode == "gtpo" and self.config.pure_on_policy:
             logger.warning(
-                f"[GTPO auto-compensation] batch_length={batch_length}, "
-                f"_original_ppo_mini_batch_size={self._original_ppo_mini_batch_size}, "
-                f"num_original_minibatches={num_original_minibatches}, "
-                f"config.ppo_epochs={self.config.ppo_epochs}, "
-                f"n_epochs={n_epochs}, "
-                f"config.ppo_mini_batch_size(after overwrite)={self.config.ppo_mini_batch_size}"
+                f"[GTPO stochastic-minibatch] batch_length={batch_length}, "
+                f"ppo_micro_batch_size_per_gpu={self.config.ppo_micro_batch_size_per_gpu}, "
+                f"num_minibatches={real_minibatch_count}, "
+                f"max_minibatch_count(after FSDP sync)={max_minibatch_count}, "
+                f"n_epochs={n_epochs}"
             )
             metrics["actor/gtpo_n_epochs"] = [n_epochs]
             metrics["actor/gtpo_batch_length"] = [batch_length]
-            metrics["actor/gtpo_original_mini_batch_size"] = [self._original_ppo_mini_batch_size]
-            metrics["actor/gtpo_num_original_minibatches"] = [num_original_minibatches]
+            metrics["actor/gtpo_num_minibatches"] = [real_minibatch_count]
 
         for epoch in range(n_epochs):
             mini_batch_start_idx = 0  # used when we need to slice traj_uid without DataProto
             for batch_idx, data in enumerate(dataloader):
+                # Detect dummy mini-batches (FSDP padding for GTPO stochastic mini-batch)
+                is_minibatch_dummy = (
+                    loss_mode == "gtpo" and self.config.pure_on_policy
+                    and not has_multi_modal_inputs
+                    and batch_idx >= real_minibatch_count
+                )
+
                 # split batch into micro_batches
                 mini_batch = data
                 traj_uid_for_minibatch = None # Initialize to avoid UnboundLocalError
                 # Prepare traj_uid slice for this mini-batch when not using DataProto chunking
                 if not has_multi_modal_inputs and traj_uid_all is not None:
-                    mb_len = len(mini_batch)
-                    traj_uid_for_minibatch = traj_uid_all[mini_batch_start_idx : mini_batch_start_idx + mb_len]
-                    mini_batch_start_idx += mb_len
+                    if is_minibatch_dummy:
+                        # Dummy mini-batch: don't advance the traj_uid index
+                        traj_uid_for_minibatch = None
+                    else:
+                        mb_len = len(mini_batch)
+                        traj_uid_for_minibatch = traj_uid_all[mini_batch_start_idx : mini_batch_start_idx + mb_len]
+                        mini_batch_start_idx += mb_len
 
                 if has_multi_modal_inputs:
                     self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
@@ -535,6 +556,10 @@ class DataParallelPPOActor(BasePPOActor):
                 elif self.config.use_dynamic_bsz:
                     max_token_len = self.config.ppo_max_token_len_per_gpu * self.ulysses_sequence_parallel_size
                     micro_batches, _ = rearrange_micro_batches(batch=mini_batch, max_token_len=max_token_len)
+                elif loss_mode == "gtpo" and self.config.pure_on_policy:
+                    # Each mini-batch is already trajectory-aware from the dataloader split.
+                    # No further splitting needed: 1 mini-batch = 1 micro-batch.
+                    micro_batches = [mini_batch]
                 else:
                     self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
                     # split batch into micro_batches
@@ -588,8 +613,8 @@ class DataParallelPPOActor(BasePPOActor):
                 for i in range(max_num_mb):
                     if i < len(micro_batches):
                         data = micro_batches[i]
-                        # All mini-batches are valid (no outer padding)
-                        is_dummy = False
+                        # Mark as dummy if this is a padded mini-batch (GTPO FSDP sync)
+                        is_dummy = is_minibatch_dummy
                     else:
                         data = last_mb
                         is_dummy = True
@@ -731,12 +756,13 @@ class DataParallelPPOActor(BasePPOActor):
                 metrics_data = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, metrics_data)
 
-                # Per-epoch debug metrics: track how ppo_kl evolves across epochs
+                # Per-minibatch debug metrics: track how ppo_kl evolves across mini-batches
                 if loss_mode == "gtpo":
+                    mb_idx = epoch * len(dataloader) + batch_idx
                     append_to_dict(metrics, {
-                        f"actor/ppo_kl_epoch{epoch}": ppo_kl.detach().item() if not is_dummy else 0.0,
-                        f"actor/pg_clipfrac_epoch{epoch}": pg_clipfrac.detach().item() if not is_dummy else 0.0,
-                        f"actor/grad_norm_epoch{epoch}": grad_norm.detach().item(),
+                        f"actor/ppo_kl_epoch{mb_idx}": ppo_kl.detach().item() if not is_dummy else 0.0,
+                        f"actor/pg_clipfrac_epoch{mb_idx}": pg_clipfrac.detach().item() if not is_dummy else 0.0,
+                        f"actor/grad_norm_epoch{mb_idx}": grad_norm.detach().item(),
                     })
 
         self.actor_optimizer.zero_grad()
