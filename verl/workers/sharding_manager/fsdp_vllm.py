@@ -221,7 +221,12 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         ):
             self.inference_engine.offload_model_weights()
         else:
-            self.inference_engine.sleep(level=1)
+            # Use level=2 for vLLM >= 0.8 which uses CuMemAllocator (CUDA VMM-based).
+            # level=1: unmaps physical pages to /dev/zero but keeps them in CuMemAllocator's
+            #          pool — PyTorch still counts them as allocated, causing OOM during training.
+            # level=2: calls cuMemRelease, truly returning physical pages to the CUDA driver,
+            #          making them available to PyTorch for training (e.g., logits tensors).
+            self.inference_engine.sleep(level=2)
 
         self.module.train()
 
