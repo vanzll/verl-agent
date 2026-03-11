@@ -570,6 +570,7 @@ class DataParallelPPOActor(BasePPOActor):
                     # Each mini-batch is already trajectory-aware from the dataloader split.
                     # No further splitting needed: 1 mini-batch = 1 micro-batch.
                     micro_batches = [mini_batch]
+                    assert len(micro_batches) == 1, "GTPO+pure_on_policy invariant violated: expected 1 micro-batch per mini-batch"
                 else:
                     self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
                     micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
