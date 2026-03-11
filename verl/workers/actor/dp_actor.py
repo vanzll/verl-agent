@@ -488,12 +488,13 @@ class DataParallelPPOActor(BasePPOActor):
             dataloader = batch.split(self.config.ppo_mini_batch_size)
             #dataloader = split_micro_batches_by_trajectory(batch, self.config.ppo_mini_batch_size, traj_uid_key="traj_uid", traj_uids=traj_uid_all)
 
-        # For GTPO with pure_on_policy, dynamically set epochs to match the
-        # number of optimizer steps that non-pure-on-policy training would have.
-        # Users can still override via config: ppo_epochs > 1 takes precedence.
+        # For GTPO with pure_on_policy, use a fixed small number of epochs
+        # to avoid overfitting instability (entropy collapse, KL explosion)
+        # that occurs with the auto-compensated ~22 epochs on the full batch.
+        # Default is 4; users can override via config: ppo_epochs > 1.
         if loss_mode == "gtpo" and self.config.pure_on_policy:
             if self.config.ppo_epochs == 1:
-                n_epochs = num_original_minibatches
+                n_epochs = 4
             else:
                 n_epochs = self.config.ppo_epochs  # user override
         else:
@@ -501,13 +502,11 @@ class DataParallelPPOActor(BasePPOActor):
 
         metrics = {}
 
-        # Debug metrics for GTPO auto-compensation diagnosis
+        # Debug metrics for GTPO diagnosis
         if loss_mode == "gtpo" and self.config.pure_on_policy:
             logger.warning(
-                f"[GTPO auto-compensation] batch_length={batch_length}, "
-                f"_original_ppo_mini_batch_size={self._original_ppo_mini_batch_size}, "
+                f"[GTPO plan-B] batch_length={batch_length}, "
                 f"num_original_minibatches={num_original_minibatches}, "
-                f"config.ppo_epochs={self.config.ppo_epochs}, "
                 f"n_epochs={n_epochs}, "
                 f"config.ppo_mini_batch_size(after overwrite)={self.config.ppo_mini_batch_size}"
             )
