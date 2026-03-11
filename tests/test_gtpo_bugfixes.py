@@ -461,7 +461,8 @@ class TestGTPOUpdatePolicyIntegration:
                           traj_index, cliprange, cliprange_low, cliprange_high, clip_ratio_c):
             captured_traj_indices.append(np.array(traj_index))
             pg_loss = torch.tensor(0.1, requires_grad=True)
-            return pg_loss, torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0)
+            n_trajs = len(np.unique(traj_index))
+            return pg_loss, torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0), n_trajs
 
         with patch("verl.workers.actor.dp_actor.compute_policy_loss_gtpo", side_effect=spy_gtpo_loss):
             metrics = actor.update_policy(data)
