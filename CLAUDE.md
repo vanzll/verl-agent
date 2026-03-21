@@ -85,8 +85,22 @@ ALFWorld, WebShop, Search (Search-R1), Sokoban, Gym Cards (EZPoints, Points24, N
 PyTorch 2.6.0, transformers (<=4.51.1), Ray (>=2.41.0,<2.50.0), vLLM (<=0.8.5) or SGLang, flash-attn, Hydra, wandb. Python 3.12 recommended.
 
 
-## 一些我的tips
-
+### Developer Tips
 - 每次回答请以 Hi Carlos 开始
-- 任何我希望你修改代码的地方， 请你都用以下工作流： 先本地main分支 pull 远程main分支的最新代码， 然后新建一个git worktree， 并在这个worktree操作后push并 pr 到main， 然后你需要等待远程reviewer的操作： 提comments 或者 merge， 如果是comments， 那么就根据comments 继续修改pr，如果是merge， 则删除本地worktree并pull 远程main到本地main。
-- 在任务过程中有任何你觉得对于仓库代码理解有实质性帮助的东西，都请添加到项目根目录的CLAUDE.md里面。如果没有特别的指令，CLAUDE.md需要被git 追踪。
+- 任何我希望你修改代码的地方， 请你都用以下工作流：
+  - 先本地main分支 pull 远程main分支的最新代码
+  - 然后新建一个git worktree， 使用你的coding 相关的skills修改代码push到远程并提draft pr， 完成后使用 Codex skill (`skill-codex:codex`) review你的代码并在PR上提comment，直到代码没有问题之后把pr从draft 变成ready for review， 然后你需要等待远程reviewer的操作： 提comments 或者 merge， 如果是comments， 那么就根据comments 继续修改pr，如果是merge， 则删除本地worktree并pull 远程main到本地main。
+    - Tips: 修改代码时，你大概率需要用到superpowers里面和写代码，软件开发相关的skill，并思考你是否需要用到其他coding相关的skill
+    - Codex review 规则: 如果当前对话 session 中已经调用过 Codex，后续再次调用时必须使用 `codex exec resume --last` 来延续同一个上下文窗口，保持 Codex 的完整上下文不丢失。同时在 resume 的 prompt 中提供足够的上下文信息（如 PR 链接、改动摘要、需要关注的重点），让 Codex 能够高效地继续工作。
+    - Codex 模型选择: 使用gpt5.3-codex 模型，并使用高 reasoning effort（high），不需要每次询问用户。
+- 我对这个项目的文档是/home/wanzl/project/Agentic-World-Model/agentic-world-model/c_knowledge.md .在任务过程中有任何你觉得对于项目有实质性帮助的东西，都请添加到项目根目录的c_knowledge.md里面。如果没有特别的指令，CLAUDE.md需要被git 追踪。
+
+
+### WANDB LINK
+Alfworld 1.5B: https://wandb.ai/vanzl3386-chinese-university-of-hong-kong-shenzhen/verl_agent_alfworld
+Webshop 1.5B: https://wandb.ai/vanzl3386-chinese-university-of-hong-kong-shenzhen/verl_agent_webshop
+Math 4B: https://wandb.ai/vanzl3386-chinese-university-of-hong-kong-shenzhen/verl_agent_math?nw=nwuservanzl3386
+你必须关注有效的run。（有效的： 指我网页端的过滤器过滤之后还保留的， 以及是“显示”状态的， 无效的： 指被网页端过滤器过滤掉的， 以及被我手动设置成不显示的。）
+
+### 飞书云文档
+Loss-Advantage Mismatch: https://my.feishu.cn/docx/CWmadoODHongjQxCS9nc32rinnb (document_id: CWmadoODHongjQxCS9nc32rinnb) 
