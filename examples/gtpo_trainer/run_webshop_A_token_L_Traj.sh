@@ -70,7 +70,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_webshop' \
-    trainer.experiment_name='gtpo_qwen2.5_1.5b_A_Token_L_Traj_webshop_3.15' \
+    trainer.experiment_name='gtpo_qwen2.5_1.5b_A_Token_L_Traj_30envsteps' \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
