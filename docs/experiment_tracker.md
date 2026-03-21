@@ -41,7 +41,7 @@ adv 和 loss 对齐，在多场景下 (纯math 4个实验：2 loss × 3 adv (GRP
     - 2.27 已完成8个， 还差traj Loss 的 四个实验
       - 现有问题， **还是GIGPO 对齐和不对齐效果差不多**。
 
-## 实验进度 Track 表格 (Claude Code 自动维护, 更新于 2026-03-21)
+## 实验进度 Track 表格 (Claude Code 自动维护, 更新于 2026-03-21 18:00)
 
 - 核心实验指标： val/success_rate
 - 每一个实验需要3个seed
@@ -51,6 +51,7 @@ adv 和 loss 对齐，在多场景下 (纯math 4个实验：2 loss × 3 adv (GRP
   - A_traj × L_traj > A_traj × L_token, A_traj × L_step
   - A_gigpo × L_step > A_gigpo × L_token, A_gigpo × L_traj（gigpo adv 粒度为 step）
 - 表格中 ⭐ 标记期望最优的对角线格子
+- 数据来源：wandb 有效可见 runs（排除 tag 过滤 + eye-icon 隐藏的 runs）
 
 ### ALFWorld 1.5B
 
@@ -58,18 +59,18 @@ adv 和 loss 对齐，在多场景下 (纯math 4个实验：2 loss × 3 adv (GRP
 
 | Adv \ Loss | L_token (vanilla) | L_step (gspo) | L_traj (gtpo) | 状态 |
 |---|---|---|---|---|
-| **A_step** | 2/3 seeds, best=0.77 avg=0.72 | ⭐ CLIP BUG 需重跑, 1ok best=0.65 | ❌ 未开始 | L_token差1seed; L_step重跑; L_traj待跑 |
-| **A_token** | ⭐ 3/3 seeds ✅, best=0.75 avg=0.73 | CLIP BUG 需重跑, 3ok best=0.62 | ❌ 未开始 | L_step重跑; L_traj待跑 |
-| **A_traj** | 3/3 seeds ✅, best=0.52 avg=0.48 | CLIP BUG 需重跑, 3ok best=0.38 | ⭐ 2/3 seeds, best=0.44 avg=0.29 | L_step重跑; L_traj差1seed |
-| **A_gigpo** | 3/3 seeds ✅, best=0.89 avg=0.87 | ⭐ 🔄 2 running, best=0.91 | 3/3 seeds ✅, best=0.33 avg=0.12 | L_step: PR#17修复后正在跑 |
-| *说明* | *clip=0.2 ✅* | *旧run clip=0.0003(BUG), PR#18已修脚本* | *Plan B (4 epochs)* | *⭐=期望对角线最优* |
+| **A_step** | 2 fin + 2 crash, best=0.77 | ⭐ 🔄 已提交 Phase 1 (3 seeds) | 🔄 已提交 Phase 2 (3 seeds) | L_token 补 1 seed (Phase 2) |
+| **A_token** | ⭐ 3 fin ✅, best=0.75 | 🔄 已提交 Phase 1 (3 seeds) | 🔄 已提交 Phase 2 (3 seeds) | Phase 1+2 已提交 |
+| **A_traj** | 3 fin ✅, best=0.52 | 🔄 已提交 Phase 1 (3 seeds) | ⭐ 1 fin + 2 crash, best=0.44 | Phase 1+2 已提交 |
+| **A_gigpo** | 3 fin ✅, best=0.89 | ⭐ 1 fin + 1 crash + 2 run, best=0.91 | 3 fin + 2 crash, best=0.33 | L_step 正在跑 |
+| *说明* | *clip=0.2 ✅* | *Phase 1: clip=0.2 重跑* | *Plan B (4 epochs)* | *⭐=期望对角线最优* |
 
 ### WebShop 1.5B
 
 | Adv \ Loss | L_token (vanilla) | L_step (gspo) | L_traj (gtpo) | 状态 |
 |---|---|---|---|---|
-| **A_step** | 4/3 seeds ✅, best=0.74 avg=0.54 | ⭐ CLIP BUG 需重跑, 4ok best=0.66 | ❌ 未开始 | L_step重跑; L_traj待跑 |
-| **A_token** | ⭐ 3/3 seeds ✅, best=0.76 avg=0.66 | CLIP BUG 需重跑, 4ok best=0.70 | ❌ 未开始 | L_step重跑; L_traj待跑 |
-| **A_traj** | 3/3 seeds ✅, best=0.75 avg=0.60 | CLIP BUG 需重跑, 1ok best=0.58 | ⭐ ❌ 未开始 | L_step重跑; L_traj待跑 |
-| **A_gigpo** | 4/3 seeds ✅, best=0.74 avg=0.72 | ⭐ ❌ 未开始 | ❌ 未开始 | L_step + L_traj均待跑 |
-| *说明* | *clip=0.2 ✅* | *旧run clip=0.0003(BUG), PR#18已修脚本* | *Plan B (4 epochs)* | *⭐=期望对角线最优* |
+| **A_step** | 4 fin + 1 crash ✅, best=0.74 | ⭐ 🔄 Phase 3 已提交 (3 seeds) | 🔄 Phase 4 已提交 (3 seeds) | Phase 3+4 已提交 |
+| **A_token** | ⭐ 3 fin ✅, best=0.76 | 🔄 Phase 3 已提交 (3 seeds) | 🔄 Phase 4 已提交 (3 seeds) | Phase 3+4 已提交 |
+| **A_traj** | 3 fin + 2 crash ✅, best=0.75 | 🔄 Phase 3 已提交 (3 seeds) | ⭐ 🔄 Phase 4 已提交 (3 seeds) | Phase 3+4 已提交 |
+| **A_gigpo** | 4 fin ✅, best=0.74 | ⭐ 🔄 Phase 3 已提交 (3 seeds) | 🔄 Phase 4 已提交 (3 seeds) | Phase 3+4 已提交 |
+| *说明* | *clip=0.2 ✅* | *旧 CLIP BUG runs 已标 meaningless* | *Plan B (4 epochs)* | *⭐=期望对角线最优* |
