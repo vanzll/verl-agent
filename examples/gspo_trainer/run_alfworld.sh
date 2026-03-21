@@ -8,8 +8,6 @@ train_data_size=16
 val_data_size=128
 group_size=8
 loss_mode="gspo"
-clip_low=0.0003
-clip_high=0.0004
 
 # The CPU resource allocated for each environment worker.
 num_cpus_per_env_worker=0.1
@@ -56,8 +54,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
     actor_rollout_ref.actor.invalid_action_penalty_coef=0.1 \
-    actor_rollout_ref.actor.clip_ratio_low=$clip_low \
-    actor_rollout_ref.actor.clip_ratio_high=$clip_high \
     algorithm.use_kl_in_reward=False \
     env.env_name=alfworld/AlfredTWEnv \
     env.seed=0 \
