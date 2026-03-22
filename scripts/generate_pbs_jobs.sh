@@ -64,8 +64,9 @@ PBSEOF
 }
 
 # =============================================================================
-# Phase 1: ALFWorld L_step 重跑 (CLIP BUG fix, 最高优先级)
-# 9 runs, ~150 epochs each
+# Phase 1: ALFWorld L_step 重跑 (CLIP BUG fix)
+# 9 runs: 3 adv (step, token, traj) × 3 seeds
+# NOTE: gigpo × L_step 已完成 (PR#17 修复后), 不需要重跑
 # =============================================================================
 echo "=== Phase 1: ALFWorld L_step 重跑 (9 jobs) ==="
 for seed in 0 1 2; do
@@ -93,8 +94,10 @@ for seed in 0 1 2; do
     generate_pbs 2 "alf_Atoken_Ltraj" "examples/gtpo_trainer/run_alfworld_adv_T_loss_Traj.sh"  "$seed" "verl-agent" "24:00:00"
 done
 
-# A_traj × L_traj: 补 1 seed
-generate_pbs 2 "alf_Atraj_Ltraj"  "examples/gtpo_trainer/run_alfworld_adv_Traj_loss_Traj.sh" 2 "verl-agent" "24:00:00"
+# A_traj × L_traj: 补 2 seeds (已有 1 fin)
+for seed in 1 2; do
+    generate_pbs 2 "alf_Atraj_Ltraj"  "examples/gtpo_trainer/run_alfworld_adv_Traj_loss_Traj.sh" "$seed" "verl-agent" "24:00:00"
+done
 
 # =============================================================================
 # Phase 3: WebShop L_step 重跑 (CLIP BUG fix)

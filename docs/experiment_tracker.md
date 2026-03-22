@@ -41,7 +41,7 @@ adv 和 loss 对齐，在多场景下 (纯math 4个实验：2 loss × 3 adv (GRP
     - 2.27 已完成8个， 还差traj Loss 的 四个实验
       - 现有问题， **还是GIGPO 对齐和不对齐效果差不多**。
 
-## 实验进度 Track 表格 (Claude Code 自动维护, 更新于 2026-03-21 18:00)
+## 实验进度 Track 表格 (Claude Code 自动维护, 更新于 2026-03-22)
 
 - 核心实验指标： val/success_rate
 - 每一个实验需要3个seed
@@ -59,11 +59,11 @@ adv 和 loss 对齐，在多场景下 (纯math 4个实验：2 loss × 3 adv (GRP
 
 | Adv \ Loss | L_token (vanilla) | L_step (gspo) | L_traj (gtpo) | 状态 |
 |---|---|---|---|---|
-| **A_step** | 2 fin + 2 crash, best=0.77 | ⭐ 🔄 已提交 Phase 1 (3 seeds) | 🔄 已提交 Phase 2 (3 seeds) | L_token 补 1 seed (Phase 2) |
-| **A_token** | ⭐ 3 fin ✅, best=0.75 | 🔄 已提交 Phase 1 (3 seeds) | 🔄 已提交 Phase 2 (3 seeds) | Phase 1+2 已提交 |
-| **A_traj** | 3 fin ✅, best=0.52 | 🔄 已提交 Phase 1 (3 seeds) | ⭐ 1 fin + 2 crash, best=0.44 | Phase 1+2 已提交 |
-| **A_gigpo** | 3 fin ✅, best=0.89 | ⭐ 1 fin + 1 crash + 2 run, best=0.91 | 3 fin + 2 crash, best=0.33 | L_step 正在跑 |
-| *说明* | *clip=0.2 ✅* | *Phase 1: clip=0.2 重跑* | *Plan B (4 epochs)* | *⭐=期望对角线最优* |
+| **A_step** | 2 fin + 2 crash, best=0.77 | ⭐ 🔄 Phase 1 已提交 (3 seeds) | 🔄 Phase 2 已提交 (3 seeds) | L_token 补 1 seed (Phase 2) |
+| **A_token** | ⭐ 3 fin ✅, best=0.75 | 🔄 Phase 1 已提交 (3 seeds) | 🔄 Phase 2 已提交 (3 seeds) | Phase 1+2 已提交 |
+| **A_traj** | 3 fin ✅, best=0.52 | 🔄 Phase 1 已提交 (3 seeds) | ⭐ 1 fin + 2 crash, best=0.44 | Phase 1 已提交; L_traj 补 2 seeds (Phase 2) |
+| **A_gigpo** | 3 fin ✅, best=0.89 | ⭐ 3 fin + 1 crash + 1 run ✅, best=0.91 | 3 fin + 2 crash, best=0.33 | ✅ 全部完成 |
+| *说明* | *clip=0.2 ✅* | *Phase 1: clip=0.2 重跑; gigpo 已完成* | *Plan B (4 epochs)* | *⭐=期望对角线最优* |
 
 ### WebShop 1.5B
 
