@@ -55,7 +55,7 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ${conda_env}
 export WANDB_API_KEY=7ec99c214723e78aa44b8aba7f745a4797b12f53
 
-bash ${REPO_ROOT}/${script} env.seed=${seed}
+bash ${REPO_ROOT}/${script} vllm env.seed=${seed}
 
 echo "Finished: \$(date)"
 PBSEOF
