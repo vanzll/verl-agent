@@ -1,5 +1,6 @@
 set -x
 ENGINE=${1:-vllm}
+[[ $# -gt 0 ]] && shift
 export VLLM_ATTENTION_BACKEND=XFORMERS
 
 # Note: Our implementation uses a leave-one-out estimate and the PPO-clip update (instead of the REINFORCE update). So it is more like LOOP (https://arxiv.org/abs/2502.01600)

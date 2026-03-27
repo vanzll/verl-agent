@@ -1,6 +1,7 @@
 set -x
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ENGINE=${1:-vllm}
+[[ $# -gt 0 ]] && shift
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 num_cpus_per_env_worker=0.1
 

@@ -1,5 +1,6 @@
 set -x
 ENGINE=${1:-vllm}
+[[ $# -gt 0 ]] && shift
 export VLLM_ATTENTION_BACKEND=XFORMERS
 
 num_cpus_per_env_worker=0.1

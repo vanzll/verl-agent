@@ -1,5 +1,6 @@
 set -x
 ENGINE=${1:-vllm}
+[[ $# -gt 0 ]] && shift
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export CUDA_VISIBLE_DEVICES=0,1
 num_cpus_per_env_worker=0.1

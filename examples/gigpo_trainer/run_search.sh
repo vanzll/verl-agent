@@ -1,6 +1,7 @@
 set -x
 
 ENGINE=${1:-vllm}
+[[ $# -gt 0 ]] && shift
 
 train_data_size=256
 val_data_size=512
